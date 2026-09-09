@@ -8,8 +8,10 @@
 
 ## Запуск
 
+```bash
 dotnet build
 dotnet run --project src/Cli
+```
 
 ## Середовище
 
@@ -19,8 +21,10 @@ dotnet run --project src/Cli
 
 ### Порівняння self-contained публікацій під різні RID
 
+```bash
 dotnet publish src/Cli -c Release -r win-x64 --self-contained true
 dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
+```
 
 Розмір каталогів publish:
 - win-x64: 78 MB
@@ -31,7 +35,9 @@ dotnet publish src/Cli -c Release -r linux-x64 --self-contained true
 
 ### Прапорець --json
 
+```bash
 dotnet run --project src/Cli -- --json
+```
 
 Виводить ту саму інформацію про середовище одним JSON-рядком (System.Text.Json)
 замість форматованої таблиці.
