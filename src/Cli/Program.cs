@@ -30,7 +30,8 @@ if (args.Contains("--json"))
         report.ProcessArchitecture,
         report.DetectedRid,
         report.ReportedRid,
-        report.BaseDirectory
+        report.BaseDirectory,
+        report.BuildNote
     };
 
     string jsonOutput = JsonSerializer.Serialize(jsonPayload, options);
@@ -49,6 +50,7 @@ else
     Console.WriteLine($"| {"RID (визначено)",-22} | {report.DetectedRid,-41} |");
     Console.WriteLine($"| {"RID (від .NET)",-22} | {report.ReportedRid,-41} |");
     Console.WriteLine($"| {"Каталог застосунку",-22} | {report.BaseDirectory,-41} |");
+    Console.WriteLine($"| {"Примітка збірки",-22} | {report.BuildNote,-41} |");
     Console.WriteLine(new string('-', 70));
     Console.WriteLine($"Предметна область: {Domain} (товари, партії, залишки, переміщення)");
 }

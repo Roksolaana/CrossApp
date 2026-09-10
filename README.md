@@ -204,3 +204,36 @@ dotnet publish src/Cli -c Release -r win-x64 --self-contained false
 - `Core/Dto/` — record-типи форматів даних (тиждень 3): `ProductDto`
 - `Core/Domain/` — сутності з поведінкою(тиждень 4): `Product`, `StockBatch`, `Warehouse`, `Movement`
 - `Core/Storage/` — реалізації сховищ (тиждень 5)
+
+### Додаткове завдання (лабораторна 2)
+
+**PublishSingleFile:**
+```bash
+dotnet publish src/Cli -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+```
+Каталог publish: 3 файли (`Cli.exe`, `Cli.pdb`, `Core.pdb`) замість десятків окремих `.dll`. Розмір ~70,16 МБ. Запускається коректно.
+
+**PublishTrimmed:**
+```bash
+dotnet publish src/Cli -c Release -r win-x64 --self-contained true -p:PublishTrimmed=true
+```
+Розмір ~19,37 МБ (майже в 4 рази менше за звичайний self-contained). Build видав попередження `IL2026` про рефлексійну серіалізацію в `JsonSerializer.Serialize`. Попередження підтвердилось на практиці: звичайний режим працює, але `--json` падає з винятком `Reflection-based serialization has been disabled for this application` — trimmer видалив метадані, потрібні для рефлексії, бо не зміг статично довести їх використання.
+
+**Умовна компіляція для multi-targeting:**
+```csharp
+#if NET10_0_OR_GREATER
+    private const string BuildNote = "збірка під net10.0";
+#else
+    private const string BuildNote = "збірка під net8.0";
+#endif
+```
+Виведено у полі "Примітка збірки": `"збірка під net10.0"` (Cli таргетує net10.0).
+
+**Порівняльна таблиця всіх варіантів публікації:**
+
+| Варіант | Розмір | Файлів | `--json` працює |
+|---|---|---|---|
+| self-contained | ~76,68 МБ | багато | так |
+| framework-dependent | ~0,20 МБ | кілька | так |
+| self-contained + SingleFile | ~70,16 МБ | 3 | так |
+| self-contained + Trimmed | ~19,37 МБ | менше | ні (падає) |
