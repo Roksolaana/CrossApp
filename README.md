@@ -103,3 +103,104 @@ CrossApp - практикум з крос-платформного програ�
 відрізняються лише значення, зчитані з реальної ОС під час виконання
 (`RuntimeInformation.OSDescription`, шляхи файлової системи), що і демонструє
 крос-платформність .NET на рівні керованого коду (IL + CLR).
+
+## Лабораторна 2: Core + Cli, ProjectReference, multi-targeting, публікація
+
+### Структура solution після роботи
+
+```
+CrossApp/
+├── CrossApp.slnx
+├── README.md
+├── .gitignore
+└── src/
+    ├── Core/
+    │   ├── Core.csproj          (TargetFrameworks: net8.0;net10.0)
+    │   └── EnvironmentInfo.cs   (namespace Core)
+    └── Cli/
+        ├── Cli.csproj           (ProjectReference → Core)
+        └── Program.cs
+```
+
+### Команди, якими додано Core і посилання
+
+```bash
+dotnet new classlib -n Core -o src/Core -f net10.0
+dotnet sln add src/Core/Core.csproj
+dotnet add src/Cli/Cli.csproj reference src/Core/Core.csproj
+```
+
+У `src/Cli/Cli.csproj` з'явився рядок:
+```xml
+<ProjectReference Include="..\Core\Core.csproj" />
+```
+Видалено шаблонний файл-заглушку `src/Core/Class1.cs`.
+
+`EnvironmentReport` — `record` (дані: результат одного вимірювання середовища). `EnvironmentInfo` — `static class` (поведінка: алгоритм збору цих даних). Логіка винесена в `Core`, бо на тижнях 10 і 12 її використовуватимуть також `Api` і `Web`, а не лише `Cli` — дублювати код у кожному клієнті небажано.
+
+`Program.cs` у `Cli` не містить жодного виклику `RuntimeInformation` — перевірено командою `grep -n "RuntimeInformation" src/Cli/Program.cs` (0 збігів). `Cli` лише викликає `EnvironmentInfo.Collect()` і форматує вивід.
+
+### Запуск
+
+```bash
+dotnet build
+dotnet run --project src/Cli
+```
+
+Вивід:
+```
+CrossApp - інформація про середовище
+Студент: Сеньків Роксолана, група ФЕІ-36
+----------------------------------------------------------------------
+| Параметр               | Значення                                  |
+----------------------------------------------------------------------
+| OC (OSDescription)     | Microsoft Windows 10.0.26200              |
+| Runtime                | .NET 10.0.11                              |
+| Архітектура процесу    | X64                                        |
+| RID (визначено)        | win-x64                                   |
+| RID (від .NET)         | win-x64                                   |
+| Каталог застосунку     | C:\CrossApp\src\Cli\bin\Debug\net10.0\    |
+----------------------------------------------------------------------
+Предметна область: Склад (товари, партії, залишки, переміщення)
+```
+
+RID, визначений вручну (`DetectRid()`), і RID від `RuntimeInformation.RuntimeIdentifier` збіглися — обидва `win-x64`.
+
+
+### Multi-targeting
+
+`Core.csproj`: `<TargetFrameworks>net8.0;net10.0</TargetFrameworks>` — зібрався успішно під обидва TFM без додаткових встановлень.
+
+
+### Публікація — порівняння режимів
+
+```bash
+dotnet publish src/Cli -c Release -r win-x64 --self-contained true
+dotnet publish src/Cli -c Release -r win-x64 --self-contained false
+```
+
+Розмір заміряно (PowerShell):
+```powershell
+(Get-ChildItem -Recurse "src\Cli\bin\Release\net10.0\win-x64\publish" | Measure-Object Length -Sum).Sum/1MB
+```
+
+| RID | Режим | Розмір publish | Потрібен runtime |
+|---|---|---|---|
+| win-x64 | self-contained | ~76,68 МБ | ні |
+| win-x64 | framework-dependent | ~0,20 МБ | так (.NET 10) |
+
+Різниця — понад 390 разів. Self-contained містить повну копію .NET runtime, framework-dependent — лише код застосунку (`Cli.dll`, `Core.dll`) і метадані залежностей.
+
+### Запуск з каталогу publish (без dotnet run)
+
+```bash
+./src/Cli/bin/Release/net10.0/win-x64/publish/Cli.exe
+```
+
+Вивід ідентичний, окрім каталогу застосунку — тепер `C:\CrossApp\src\Cli\bin\Release\net10.0\win-x64\publish\` (Release-публікація), що підтверджує коректність `AppContext.BaseDirectory` як динамічного значення.
+
+### Плановане розміщення коду в Core
+
+- `Core/Dto/` — record-типи форматів даних (тиждень 3): `ProductDto`
+- `Core/Domain/` — сутності з поведінкою(тиждень 4): `Product`, `StockBatch`, `Warehouse`, `Movement`
+- `Core/Storage/` — реалізації сховищ (тиждень 5)

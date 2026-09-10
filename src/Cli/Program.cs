@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+﻿using Core;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -6,20 +6,11 @@ using System.Text.Unicode;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-var systemInfo = new
-{
-    Application = "CrossApp",
-    Student = "Сеньків Роксолана",
-    Group = "ФЕІ-36",
-    Domain = "Склад",
-    OSDescription = RuntimeInformation.OSDescription,
-    OSVersion = Environment.OSVersion.ToString(),
-    Architecture = RuntimeInformation.ProcessArchitecture.ToString(),
-    DotNetVersion = Environment.Version.ToString(),
-    Runtime = RuntimeInformation.FrameworkDescription,
-    BaseDirectory = AppContext.BaseDirectory,
-    CurrentDirectory = Environment.CurrentDirectory
-};
+const string Student = "Сеньків Роксолана";
+const string Group = "ФЕІ-36";
+const string Domain = "Склад";
+
+EnvironmentReport report = EnvironmentInfo.Collect();
 
 if (args.Contains("--json"))
 {
@@ -27,23 +18,37 @@ if (args.Contains("--json"))
     {
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
     };
-    string jsonOutput = JsonSerializer.Serialize(systemInfo, options);
+
+    var jsonPayload = new
+    {
+        Application = "CrossApp",
+        Student,
+        Group,
+        Domain,
+        report.OsDescription,
+        report.FrameworkDescription,
+        report.ProcessArchitecture,
+        report.DetectedRid,
+        report.ReportedRid,
+        report.BaseDirectory
+    };
+
+    string jsonOutput = JsonSerializer.Serialize(jsonPayload, options);
     Console.WriteLine(jsonOutput);
 }
 else
 {
-    Console.WriteLine("CrossApp - практикум з крос-платформного програмування");
-    Console.WriteLine($"Студент: {systemInfo.Student}, група {systemInfo.Group}");
+    Console.WriteLine("CrossApp - інформація про середовище");
+    Console.WriteLine($"Студент: {Student}, група {Group}");
     Console.WriteLine(new string('-', 70));
     Console.WriteLine($"| {"Параметр",-22} | {"Значення",-41} |");
     Console.WriteLine(new string('-', 70));
-    Console.WriteLine($"| {"OC (OSDescription)",-22} | {systemInfo.OSDescription,-41} |");
-    Console.WriteLine($"| {"OC (Environment)",-22} | {systemInfo.OSVersion,-41} |");
-    Console.WriteLine($"| {"Архітектура процесу",-22} | {systemInfo.Architecture,-41} |");
-    Console.WriteLine($"| {"Версія .NET (CLR)",-22} | {systemInfo.DotNetVersion,-41} |");
-    Console.WriteLine($"| {"Runtime",-22} | {systemInfo.Runtime,-41} |");
-    Console.WriteLine($"| {"Каталог застосунку",-22} | {systemInfo.BaseDirectory,-41} |");
-    Console.WriteLine($"| {"Поточний каталог",-22} | {systemInfo.CurrentDirectory,-41} |");
+    Console.WriteLine($"| {"OC (OSDescription)",-22} | {report.OsDescription,-41} |");
+    Console.WriteLine($"| {"Runtime",-22} | {report.FrameworkDescription,-41} |");
+    Console.WriteLine($"| {"Архітектура процесу",-22} | {report.ProcessArchitecture,-41} |");
+    Console.WriteLine($"| {"RID (визначено)",-22} | {report.DetectedRid,-41} |");
+    Console.WriteLine($"| {"RID (від .NET)",-22} | {report.ReportedRid,-41} |");
+    Console.WriteLine($"| {"Каталог застосунку",-22} | {report.BaseDirectory,-41} |");
     Console.WriteLine(new string('-', 70));
-    Console.WriteLine($"Предметна область: {systemInfo.Domain} (товари, партії, залишки, переміщення)");
+    Console.WriteLine($"Предметна область: {Domain} (товари, партії, залишки, переміщення)");
 }
