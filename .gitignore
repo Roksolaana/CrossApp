@@ -480,3 +480,11 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+publish-singlefile/
+publish-trimmed/
+publish-fd-win/
+publish-fd-linux/
+publish-sc-win/       
+publish-sc-linux/
+
