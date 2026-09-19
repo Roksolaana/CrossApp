@@ -237,3 +237,122 @@ dotnet publish src/Cli -c Release -r win-x64 --self-contained true -p:PublishTri
 | framework-dependent | ~0,20 МБ | кілька | так |
 | self-contained + SingleFile | ~70,16 МБ | 3 | так |
 | self-contained + Trimmed | ~19,37 МБ | менше | ні (падає) |
+
+## Лабораторна 3: Базові типи домену, pattern matching, імпорт CSV/JSON
+
+### Структура, додана цією роботою
+CrossApp/
+├── data/
+│ ├── sample.csv (10+ рядків, з них 3 навмисно пошкоджені)
+│ ├── sample_clean.csv (10 коректних рядків — для тесту "чистого" імпорту)
+│ ├── sample.json (альтернативний формат вхідних даних)
+│ └── sample.txt (демонстрація непідтримуваного розширення)
+└── src/
+└── Core/
+├── Dto/
+│ └── ProductDto.cs (record, namespace Core.Dto)
+├── ImportResult.cs (record ImportResult<T>, namespace Core.Dto)
+└── Import/
+├── ProductCsvImporter.cs (namespace Core.Import)
+└── ProductJsonImporter.cs (namespace Core.Import)
+
+
+### Record-типи
+
+```csharp
+public record ProductDto(
+    string Id, string Sku, string Name, string Unit, int Quantity,
+    string? Note = null);
+
+public sealed record ImportResult<T>(IReadOnlyList<T> Items, IReadOnlyList<string> Errors);
+```
+
+`Note` — єдине nullable-поле: примітка до товару справді може бути відсутньою, решта полів обов'язкові для повноцінного запису складського обліку.
+
+### Розбір рядка: pattern matching
+
+`ProductCsvImporter.ParseLine` розбирає рядок через `switch expression` із чотирма видами патернів:
+
+| Патерн | Приклад | Призначення |
+|---|---|---|
+| Патерн властивості + реляційний | `{ Length: < 5 }` | відсіює рядки з недостатньою кількістю колонок |
+| List pattern з константами + `or` | `[_, "", _, _, _] or [_, _, "", _, _]` | виявляє порожній SKU або назву |
+| Охоронна умова `when` + `out` | `[..., var qty] when !int.TryParse(qty, out int q) \|\| q < 0` | перевіряє коректність числа |
+| Іменований list pattern | `[var id, var sku, var name, var unit, var qty]` | успішний розбір, деструктуризація одразу в змінні |
+
+Пошкоджений рядок не перериває імпорт решти файлу — кожен результат розбору повертається як `ParseOk` або `ParseFailed` (закрита ієрархія `sealed record`), а помилки збираються окремо від успішних записів у `ImportResult<T>.Errors`.
+
+### Запуск
+
+```bash
+# коректний файл
+dotnet run --project src/Cli -- data/sample.csv
+
+# інший формат (JSON)
+dotnet run --project src/Cli -- data/sample.json
+
+# неіснуючий файл — не падає, виводить зрозуміле повідомлення
+dotnet run --project src/Cli -- data/no_such_file.csv
+```
+
+### Приклад виводу (data/sample.csv)
+
+Завантажено записів: 10
+P-001 SKU-001 Цемент М400 25кг 120 шт
+P-002 SKU-002 Пісок будівельний 18 т
+P-003 SKU-003 Цегла червона 4200 шт
+P-004 SKU-004 Фарба водоемульсійна 10л 36 шт
+P-005 SKU-005 Шпаклівка фінішна 250 кг
+Пропущено рядків: 3
+! рядок 12: очікую 5 колонок, отримав 4
+! рядок 13: кількість 'багато' не є невід'ємним числом
+! рядок 14: SKU або назва порожні
+Статистика: усього 13 / прийнято 10 / пропущено 3 / помилок 23.1%
+
+
+### Приклад виводу (файл не знайдено)
+
+Файл не знайдено: C:\CrossApp\data\no_such_file.csv
+
+Код завершення процесу — `1` (перевірено командою `echo $?`); програма не кидає необроблений виняток.
+
+### Формат вхідного файлу
+
+- Роздільник — `;` (крапка з комою), не конфліктує з комами в назвах товарів.
+- Перший рядок може бути заголовком (`id;sku;name;unit;quantity`) — розпізнається й пропускається автоматично, файл без заголовка також обробляється коректно.
+- Кодування — UTF-8, читання явно виконується через `File.ReadAllLines(path, Encoding.UTF8)`.
+
+### Виявлена проблема: локалізоване форматування чисел
+
+За замовчуванням `{value:F1}` форматує дробові числа за **поточною культурою ОС**: на українській локалі десятковий розділювач — кома (`23,1`), а не крапка (`23.1`). Це та сама проблема, про яку методичка попереджає для парсингу (`CultureInfo.InvariantCulture`), лише в дзеркальному напрямку — при виведенні результату.
+
+**Рішення:**
+```csharp
+errorRate.ToString("F1", CultureInfo.InvariantCulture)
+```
+Тепер вивід не залежить від локалі системи, на якій запускається програма.
+
+### Додаткове завдання: другий імпортер (JSON)
+
+```csharp
+var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+var items = JsonSerializer.Deserialize<List<ProductDto>>(json, options) ?? [];
+```
+
+Вибір імпортера за розширенням файлу реалізовано через `switch expression`:
+```csharp
+ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".csv" => ProductCsvImporter.Load(path),
+    ".json" => ProductJsonImporter.Load(path),
+    var ext => throw new NotSupportedException($"Непідтримуване розширення: {ext}")
+};
+```
+
+На відміну від CSV, пошкоджений JSON не можна розібрати частково — `JsonSerializer.Deserialize` або повертає весь масив, або кидає виняток на весь файл одразу. Це принципова відмінність формату: CSV дозволяє ізолювати пошкоджені рядки один від одного, JSON (як єдина деревоподібна структура) — ні.
+
+### Додаткове завдання: статистика імпорту
+
+Статистика: усього 13 / прийнято 10 / пропущено 3 / помилок 23.1%
+
+Обчислюється одним виразом як заготовка під звіти сьомого тижня (LINQ-агрегації).
