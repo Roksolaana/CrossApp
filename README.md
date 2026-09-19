@@ -241,21 +241,23 @@ dotnet publish src/Cli -c Release -r win-x64 --self-contained true -p:PublishTri
 ## Лабораторна 3: Базові типи домену, pattern matching, імпорт CSV/JSON
 
 ### Структура, додана цією роботою
+
+```text
 CrossApp/
 ├── data/
-│ ├── sample.csv (10+ рядків, з них 3 навмисно пошкоджені)
-│ ├── sample_clean.csv (10 коректних рядків — для тесту "чистого" імпорту)
-│ ├── sample.json (альтернативний формат вхідних даних)
-│ └── sample.txt (демонстрація непідтримуваного розширення)
+│   ├── sample.csv (10+ рядків, з них 3 навмисно пошкоджені)
+│   ├── sample_clean.csv (10 коректних рядків — для тесту "чистого" імпорту)
+│   ├── sample.json (альтернативний формат вхідних даних)
+│   └── sample.txt (демонстрація непідтримуваного розширення)
 └── src/
-└── Core/
-├── Dto/
-│ └── ProductDto.cs (record, namespace Core.Dto)
-├── ImportResult.cs (record ImportResult<T>, namespace Core.Dto)
-└── Import/
-├── ProductCsvImporter.cs (namespace Core.Import)
-└── ProductJsonImporter.cs (namespace Core.Import)
-
+    └── Core/
+        ├── Dto/
+        │   └── ProductDto.cs (record, namespace Core.Dto)
+        ├── ImportResult.cs (record ImportResult<T>, namespace Core.Dto)
+        └── Import/
+            ├── ProductCsvImporter.cs (namespace Core.Import)
+            └── ProductJsonImporter.cs (namespace Core.Import)
+```
 
 ### Record-типи
 
@@ -271,16 +273,32 @@ public sealed record ImportResult<T>(IReadOnlyList<T> Items, IReadOnlyList<strin
 
 ### Розбір рядка: pattern matching
 
-`ProductCsvImporter.ParseLine` розбирає рядок через `switch expression` із чотирма видами патернів:
+Метод `ProductCsvImporter.ParseLine` валідує та деструктурує вхідний масив колонок через єдиний `switch expression`:
 
-| Патерн | Приклад | Призначення |
-|---|---|---|
-| Патерн властивості + реляційний | `{ Length: < 5 }` | відсіює рядки з недостатньою кількістю колонок |
-| List pattern з константами + `or` | `[_, "", _, _, _] or [_, _, "", _, _]` | виявляє порожній SKU або назву |
-| Охоронна умова `when` + `out` | `[..., var qty] when !int.TryParse(qty, out int q) \|\| q < 0` | перевіряє коректність числа |
-| Іменований list pattern | `[var id, var sku, var name, var unit, var qty]` | успішний розбір, деструктуризація одразу в змінні |
+```csharp
+return parts switch
+{
+    // Патерн властивості + реляційний: відсіює рядки з недостатньою кількістю колонок
+    { Length: < 5 } => 
+        new ParseFailed("очікую 5 колонок"),
 
-Пошкоджений рядок не перериває імпорт решти файлу — кожен результат розбору повертається як `ParseOk` або `ParseFailed` (закрита ієрархія `sealed record`), а помилки збираються окремо від успішних записів у `ImportResult<T>.Errors`.
+    // List pattern з константами + 'or': виявляє порожній SKU або назву
+    [_, "", _, _, _] or [_, _, "", _, _] => 
+        new ParseFailed("SKU або назва порожні"),
+
+    // Охоронна умова 'when' + 'out': перевіряє коректність числа
+    [.., var qty] when !int.TryParse(qty, out int q) || q < 0 => 
+        new ParseFailed($"кількість '{qty}' не є невід'ємним числом"),
+
+    // Іменований list pattern: успішний розбір і деструктуризація одразу в змінні
+    [var id, var sku, var name, var unit, var qty] => 
+        new ParseOk(new ProductDto(id, sku, name, unit, int.Parse(qty))),
+
+    _ => new ParseFailed("некоректний формат рядка")
+};
+```
+
+Пошкоджений рядок не перериває імпорт решти файлу — кожен результат повертається через `ParseOk` або `ParseFailed` (закрита ієрархія `sealed record`), а помилки збираються окремо від успішних записів у `ImportResult<T>.Errors`.
 
 ### Запуск
 
@@ -297,6 +315,7 @@ dotnet run --project src/Cli -- data/no_such_file.csv
 
 ### Приклад виводу (data/sample.csv)
 
+```text
 Завантажено записів: 10
 P-001 SKU-001 Цемент М400 25кг 120 шт
 P-002 SKU-002 Пісок будівельний 18 т
@@ -308,11 +327,13 @@ P-005 SKU-005 Шпаклівка фінішна 250 кг
 ! рядок 13: кількість 'багато' не є невід'ємним числом
 ! рядок 14: SKU або назва порожні
 Статистика: усього 13 / прийнято 10 / пропущено 3 / помилок 23.1%
-
+```
 
 ### Приклад виводу (файл не знайдено)
 
+```text
 Файл не знайдено: C:\CrossApp\data\no_such_file.csv
+```
 
 Код завершення процесу — `1` (перевірено командою `echo $?`); програма не кидає необроблений виняток.
 
@@ -327,9 +348,11 @@ P-005 SKU-005 Шпаклівка фінішна 250 кг
 За замовчуванням `{value:F1}` форматує дробові числа за **поточною культурою ОС**: на українській локалі десятковий розділювач — кома (`23,1`), а не крапка (`23.1`). Це та сама проблема, про яку методичка попереджає для парсингу (`CultureInfo.InvariantCulture`), лише в дзеркальному напрямку — при виведенні результату.
 
 **Рішення:**
+
 ```csharp
 errorRate.ToString("F1", CultureInfo.InvariantCulture)
 ```
+
 Тепер вивід не залежить від локалі системи, на якій запускається програма.
 
 ### Додаткове завдання: другий імпортер (JSON)
@@ -340,6 +363,7 @@ var items = JsonSerializer.Deserialize<List<ProductDto>>(json, options) ?? [];
 ```
 
 Вибір імпортера за розширенням файлу реалізовано через `switch expression`:
+
 ```csharp
 ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() switch
 {
@@ -353,6 +377,8 @@ ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() swi
 
 ### Додаткове завдання: статистика імпорту
 
+```text
 Статистика: усього 13 / прийнято 10 / пропущено 3 / помилок 23.1%
+```
 
 Обчислюється одним виразом як заготовка під звіти сьомого тижня (LINQ-агрегації).
