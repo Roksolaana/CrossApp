@@ -246,17 +246,21 @@ dotnet publish src/Cli -c Release -r win-x64 --self-contained true -p:PublishTri
 CrossApp/
 ├── data/
 │   ├── sample.csv (10+ рядків, з них 3 навмисно пошкоджені)
-│   ├── sample_clean.csv (10 коректних рядків — для тесту "чистого" імпорту)
-│   ├── sample.json (альтернативний формат вхідних даних)
+│   ├── sample_clean.csv (10 коректних рядків)
+│   ├── sample_no_header.csv (тест імпорту без рядка заголовків)
+│   ├── mixed.csv (дані з різними сутностями: товари та склади)
+│   ├── sample.json (альтернативний формат)
 │   └── sample.txt (демонстрація непідтримуваного розширення)
 └── src/
     └── Core/
         ├── Dto/
-        │   └── ProductDto.cs (record, namespace Core.Dto)
-        ├── ImportResult.cs (record ImportResult<T>, namespace Core.Dto)
+        │   ├── ProductDto.cs
+        │   └── WarehouseDto.cs (нове)
+        ├── ImportResult.cs
         └── Import/
-            ├── ProductCsvImporter.cs (namespace Core.Import)
-            └── ProductJsonImporter.cs (namespace Core.Import)
+            ├── ProductCsvImporter.cs
+            ├── ProductJsonImporter.cs
+            └── MixedImporter.cs
 ```
 
 ### Record-типи
@@ -308,6 +312,12 @@ dotnet run --project src/Cli -- data/sample.csv
 
 # інший формат (JSON)
 dotnet run --project src/Cli -- data/sample.json
+
+# неіснуючий файл — не падає, виводить зрозуміле повідомлення
+dotnet run --project src/Cli -- data/no_such_file.csv
+
+# змішаний імпорт різних сутностей (додаткове завдання 2)
+dotnet run --project src/Cli -- --mixed
 
 # неіснуючий файл — не падає, виводить зрозуміле повідомлення
 dotnet run --project src/Cli -- data/no_such_file.csv
@@ -382,3 +392,28 @@ ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() swi
 ```
 
 Обчислюється одним виразом як заготовка під звіти сьомого тижня (LINQ-агрегації).
+
+###  Додаткове завдання: розпізнавання різнорідних рядків 
+Для одночасного імпорту кількох сутностей з одного файлу створено WarehouseDto та MixedImporter. Файл mixed.csv містить рядки товарів (префікс P) та складів (префікс W).
+
+Логіку парсингу повністю ізольовано від читання файлу в методі ParseLine (повертає закриту ієрархію ParseOutcome). Це архітектурний бест-практіс, який у майбутньому дозволить писати Unit-тести для парсера, передаючи рядки в пам'яті без створення фізичних файлів на диску.
+
+Розпізнавання реалізовано через єдиний switch expression:
+```csharp
+return parts switch
+{
+    ["P", var id, var sku, var name, var unit, var qty] when int.TryParse(qty, CultureInfo.InvariantCulture, out int q) && q >= 0 
+        => new ParseProductOk(new ProductDto(id, sku, name, unit, q)),
+        
+    ["W", var id, var name, var city] 
+        => new ParseWarehouseOk(new WarehouseDto(id, name, city)),
+        
+    ["P", ..] or ["W", ..] 
+        => new ParseFailed("невірна кількість колонок для цього типу"),
+        
+    _ => new ParseFailed($"невідомий префікс типу '{parts.FirstOrDefault()}'")
+};
+```
+Константні патерни ("P", "W") на першій позиції працюють як маркери типу сутності.
+
+Патерн зрізу (..) у комбінації з логічним or безпечно відловлює пошкоджену структуру колонок (брак або надлишок полів) для відомих префіксів, не перериваючи парсинг інших валідних рядків.

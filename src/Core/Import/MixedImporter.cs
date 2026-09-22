@@ -22,28 +22,44 @@ public static class MixedImporter
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            string[] parts = line.Split(Separator, StringSplitOptions.TrimEntries);
-
-            switch (parts)
+            switch (ParseLine(line))
             {
-                case ["P", var id, var sku, var name, var unit, var qty] when int.TryParse(qty, out int q):
-                    products.Add(new ProductDto(id, sku, name, unit, q));
+                case ParseProductOk p:
+                    products.Add(p.Value);
                     break;
-
-                case ["W", var id, var name, var city]:
-                    warehouses.Add(new WarehouseDto(id, name, city));
+                case ParseWarehouseOk w:
+                    warehouses.Add(w.Value);
                     break;
-
-                case ["P", ..] or ["W", ..]:
-                    errors.Add($"рядок {number}: невірна кількість колонок для цього типу");
-                    break;
-
-                default:
-                    errors.Add($"рядок {number}: невідомий префікс типу '{parts.FirstOrDefault()}'");
+                case ParseFailed f:
+                    errors.Add($"рядок {number}: {f.Reason}");
                     break;
             }
         }
 
         return (products, warehouses, errors);
     }
+
+    private static ParseOutcome ParseLine(string line)
+    {
+        string[] parts = line.Split(Separator, StringSplitOptions.TrimEntries);
+
+        return parts switch
+        {
+            ["P", var id, var sku, var name, var unit, var qty] when int.TryParse(qty, out int q) 
+                => new ParseProductOk(new ProductDto(id, sku, name, unit, q)),
+                
+            ["W", var id, var name, var city] 
+                => new ParseWarehouseOk(new WarehouseDto(id, name, city)),
+                
+            ["P", ..] or ["W", ..] 
+                => new ParseFailed("невірна кількість колонок для цього типу"),
+                
+            _ => new ParseFailed($"невідомий префікс типу '{parts.FirstOrDefault()}'")
+        };
+    }
+
+    private abstract record ParseOutcome;
+    private sealed record ParseProductOk(ProductDto Value) : ParseOutcome;
+    private sealed record ParseWarehouseOk(WarehouseDto Value) : ParseOutcome;
+    private sealed record ParseFailed(string Reason) : ParseOutcome;
 }

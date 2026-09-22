@@ -2,6 +2,27 @@
 using Core.Import;
 using System.Globalization;
 
+if (args.Contains("--mixed"))
+{
+    string mixedPath = Path.Combine("data", "mixed.csv");
+    var (products, warehouses, errors) = MixedImporter.Load(mixedPath);
+
+    Console.WriteLine($"Товарів: {products.Count}, складів: {warehouses.Count}");
+    foreach (var p in products)
+        Console.WriteLine($"  [P] {p.Id} {p.Sku} {p.Name} {p.Quantity} {p.Unit}");
+    foreach (var w in warehouses)
+        Console.WriteLine($"  [W] {w.Id} {w.Name} {w.City}");
+
+    if (errors.Count > 0)
+    {
+        Console.WriteLine($"Помилок: {errors.Count}");
+        foreach (var e in errors)
+            Console.WriteLine($"  ! {e}");
+    }
+
+    return 0;
+}
+
 string path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
 
 if (!File.Exists(path))
