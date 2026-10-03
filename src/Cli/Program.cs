@@ -21,6 +21,52 @@ if (args.Contains("--domain"))
 
     return 0;
 }
+if (args.Contains("--validate"))
+{
+    string validatePath = args.Length > 1 ? args[1] : Path.Combine("data", "sample.csv");
+    ImportResult<ProductDto> dtoResult = ProductCsvImporter.Load(validatePath);
+    ImportResult<Product> domainResult = ProductDomainMapper.FromImportResult(dtoResult);
+
+    Console.WriteLine($"Валідних товарів: {domainResult.Items.Count}");
+    foreach (Product p in domainResult.Items.Take(5))
+        Console.WriteLine($"  {p}");
+
+    if (domainResult.Errors.Count > 0)
+    {
+        Console.WriteLine($"Відхилено: {domainResult.Errors.Count}");
+        foreach (string e in domainResult.Errors)
+            Console.WriteLine($"  ! {e}");
+    }
+
+    return 0;
+}
+
+if (args.Contains("--warehouse"))
+{
+    Warehouse warehouse = Warehouse.Create("W-001", "Головний склад", 150);
+    Product warehouseProduct = Product.Create("P-001", "SKU-001", "Цемент", "шт", 100);
+
+    WarehouseService.RegisterArrival(warehouse, warehouseProduct, 40);
+    Console.WriteLine($"Товар: {warehouseProduct}");
+    Console.WriteLine($"Склад: зайнято {warehouse.Occupied} з {warehouse.Capacity}");
+
+    TryDo("перевищення місткості складу", () => WarehouseService.RegisterArrival(warehouse, warehouseProduct, 200));
+
+    return 0;
+}
+
+if (args.Contains("--movement"))
+{
+    Movement movement = Movement.Create("M-001", "P-001", 50);
+    Console.WriteLine($"Статус: {movement.Status}");
+
+    movement.TransitionTo(MovementStatus.Confirmed);
+    Console.WriteLine($"Статус: {movement.Status}");
+
+    TryDo("скасувати підтверджене", () => movement.TransitionTo(MovementStatus.Cancelled));
+
+    return 0;
+}
 
 if (args.Contains("--mixed"))
 {
