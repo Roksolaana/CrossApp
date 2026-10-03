@@ -1,6 +1,26 @@
 ﻿using Core.Dto;
 using Core.Import;
-using System.Globalization;
+using Core.Domain;
+
+if (args.Contains("--domain"))
+{
+    Console.WriteLine("=== Сценарій 1: успіх ===");
+    Product product = Product.Create("P-001", "sku-001", "Цемент М400 25кг", "шт", 100);
+    Console.WriteLine(product);
+
+    product.RegisterArrival(50);
+    product.Issue(30);
+    Console.WriteLine(product);
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 2: порушення інваріантів ===");
+
+    TryDo("видача більша за залишок", () => product.Issue(1000));
+    TryDo("порожній SKU", () => Product.Create("P-002", " ", "Пісок", "т", 10));
+    TryDo("від'ємний залишок", () => Product.Create("P-003", "SKU-003", "Цегла", "шт", -5));
+
+    return 0;
+}
 
 if (args.Contains("--mixed"))
 {
@@ -48,9 +68,19 @@ if (result.Errors.Count > 0)
     foreach (string e in result.Errors)
         Console.WriteLine($"  ! {e}");
 }
-
-int total = result.Items.Count + result.Errors.Count;
-double errorRate = total == 0 ? 0 : result.Errors.Count * 100.0 / total;
-Console.WriteLine($"Статистика: усього {total} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {errorRate.ToString("F1", CultureInfo.InvariantCulture)}%");
+Console.WriteLine($"Статистика: усього {result.Total} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {result.ErrorRateFormatted}%");
 
 return 0;
+
+static void TryDo(string title, Action action)
+{
+    try
+    {
+        action();
+        Console.WriteLine($"  {title}: виняток НЕ спрацював — інваріант відсутній!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  {title}: {ex.GetType().Name} — {ex.Message}");
+    }
+}
