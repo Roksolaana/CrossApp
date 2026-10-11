@@ -525,3 +525,53 @@ dotnet run --project src/Cli -- --warehouse
 ```bash
 dotnet run --project src/Cli -- --movement
 ```
+## Лабораторна 5: сервісний шар, інтерфейси, ручний DI
+
+### Архітектура
+
+- Інтерфейс сховища: `ICatalogStore` (`List`, `GetById`, `Add`, `Update`, `Remove`)
+- Реалізації інтерфейсу:
+  - `InMemoryCatalogStore` — словник у пам'яті, дані зникають після завершення програми
+  - `FileCatalogStore` — кеш у пам'яті + JSON-файл, запис на диск після кожної зміни
+- Сервіс: `CatalogService` (операції `Add`, `Receive`, `Issue`, `All`, `Find`);
+  залежить лише від `ICatalogStore`, залежність передається через конструктор
+- Composition root: `src/Cli/Program.cs` — єдине місце, де створюються конкретні класи сховищ
+- Дані для демонстрації: `src/Core/SampleData.cs` (15 записів)
+
+Схема залежностей:
+
+    Cli → CatalogService → ICatalogStore → InMemoryCatalogStore | FileCatalogStore
+
+Файловий формат: JSON-масив `ProductDto` (на диск записуються DTO, а не сутності;
+мапінг через `Product.ToDto` / `Product.FromDto`, тому інваріанти перевіряються і при читанні файлу).
+
+### Запуск
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli` | сховище в пам'яті (`InMemoryCatalogStore`), дані не зберігаються між запусками |
+| `dotnet run --project src/Cli -- --file` | файлове сховище (`FileCatalogStore`), дані накопичуються між запусками |
+| `dotnet run --project src/Cli -- --import` | імпорт CSV/JSON (лаб. 3) |
+| `dotnet run --project src/Cli -- --import data/sample.csv` | імпорт із вказаного файлу (лаб. 3) |
+
+Файл даних створюється за шляхом `<каталог виводу>/data/catalog.json`
+(наприклад, `src/Cli/bin/Debug/net10.0/data/catalog.json`); повний шлях виводиться в консоль.
+Якщо файл має старий формат (`JsonException`), його потрібно видалити.
+
+### Зміна команд для лаб. 3
+
+Починаючи з лаб. 5, запуск без прапорців виконує сценарій сервісного шару, а не імпорт.
+Тому старі команди лаб. 3 змінилися:
+
+| Було (лаб. 3) | Стало (лаб. 5) |
+|---|---|
+| `dotnet run --project src/Cli` | `dotnet run --project src/Cli -- --import` |
+| `dotnet run --project src/Cli -- data/sample.csv` | `dotnet run --project src/Cli -- --import data/sample.csv` |
+
+Прапорці лаб. 4 (`--domain`, `--validate`, `--warehouse`, `--movement`, `--mixed`) не змінилися.
+
+### Обмеження
+
+- Контейнер DI (`Microsoft.Extensions.DependencyInjection`) не використовується:
+  залежності з'єднуються вручну через `new` у `Program.cs`.
+- Кирилиця у `catalog.json` записується як `\uXXXX` — штатне екранування `System.Text.Json`.

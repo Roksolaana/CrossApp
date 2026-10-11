@@ -1,6 +1,10 @@
-﻿using Core.Dto;
-using Core.Import;
+﻿using Core;
+using Core.Abstractions;
 using Core.Domain;
+using Core.Dto;
+using Core.Import;
+using Core.Services;
+using Core.Storage;
 
 if (args.Contains("--domain"))
 {
@@ -18,9 +22,11 @@ if (args.Contains("--domain"))
     TryDo("видача більша за залишок", () => product.Issue(1000));
     TryDo("порожній SKU", () => Product.Create("P-002", " ", "Пісок", "т", 10));
     TryDo("від'ємний залишок", () => Product.Create("P-003", "SKU-003", "Цегла", "шт", -5));
-
+    Console.WriteLine();
+    Console.WriteLine($"Після всіх відмов: {product}");
     return 0;
 }
+
 if (args.Contains("--validate"))
 {
     string validatePath = args.Length > 1 ? args[1] : Path.Combine("data", "sample.csv");
@@ -89,32 +95,70 @@ if (args.Contains("--mixed"))
     return 0;
 }
 
-string path = args.Length > 0 ? args[0] : Path.Combine("data", "sample.csv");
-
-if (!File.Exists(path))
+// ===== Лаб. 3: імпорт тепер під прапорцем --import =====
+if (args.Contains("--import"))
 {
-    Console.WriteLine($"Файл не знайдено: {Path.GetFullPath(path)}");
-    return 1;
+    string[] importArgs = args.Where(a => a != "--import").ToArray();
+    string path = importArgs.Length > 0 ? importArgs[0] : Path.Combine("data", "sample.csv");
+
+    if (!File.Exists(path))
+    {
+        Console.WriteLine($"Файл не знайдено: {Path.GetFullPath(path)}");
+        return 1;
+    }
+
+    ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".csv" => ProductCsvImporter.Load(path),
+        ".json" => ProductJsonImporter.Load(path),
+        var ext => throw new NotSupportedException($"Непідтримуване розширення: {ext}")
+    };
+
+    Console.WriteLine($"Завантажено записів: {result.Items.Count}");
+    foreach (ProductDto p in result.Items.Take(5))
+        Console.WriteLine($"  {p.Id,-6} {p.Sku,-10} {p.Name,-26} {p.Quantity,5} {p.Unit}");
+
+    if (result.Errors.Count > 0)
+    {
+        Console.WriteLine($"Пропущено рядків: {result.Errors.Count}");
+        foreach (string e in result.Errors)
+            Console.WriteLine($"  ! {e}");
+    }
+    Console.WriteLine($"Статистика: усього {result.Total} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {result.ErrorRateFormatted}%");
+
+    return 0;
 }
 
-ImportResult<ProductDto> result = Path.GetExtension(path).ToLowerInvariant() switch
-{
-    ".csv" => ProductCsvImporter.Load(path),
-    ".json" => ProductJsonImporter.Load(path),
-    var ext => throw new NotSupportedException($"Непідтримуване розширення: {ext}")
-};
+// ===== Лаб. 5: composition root (режим за замовчуванням) =====
+bool useFile = args.Contains("--file");
+string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "catalog.json");
 
-Console.WriteLine($"Завантажено записів: {result.Items.Count}");
-foreach (ProductDto p in result.Items.Take(5))
-    Console.WriteLine($"  {p.Id,-6} {p.Sku,-10} {p.Name,-26} {p.Quantity,5} {p.Unit}");
+// Єдине місце, де створюються конкретні класи сховища
+ICatalogStore store = useFile
+    ? new FileCatalogStore(dataPath)
+    : new InMemoryCatalogStore(SampleData.Products());
 
-if (result.Errors.Count > 0)
-{
-    Console.WriteLine($"Пропущено рядків: {result.Errors.Count}");
-    foreach (string e in result.Errors)
-        Console.WriteLine($"  ! {e}");
-}
-Console.WriteLine($"Статистика: усього {result.Total} / прийнято {result.Items.Count} / пропущено {result.Errors.Count} / помилок {result.ErrorRateFormatted}%");
+var service = new CatalogService(store);
+
+Console.WriteLine($"Сховище: {store.GetType().Name}");
+if (useFile)
+    Console.WriteLine($"Файл: {dataPath}");
+
+Console.WriteLine();
+Console.WriteLine("=== Сценарій 1: успіх ===");
+var created = service.Add("SKU-101", "Кабель UTP cat6", "м", 50);
+service.Receive(created.Id, 25);
+service.Issue(created.Id, 10);
+
+Console.WriteLine($"Знайдено за id: {service.Find(created.Id)}");
+foreach (var p in service.All())
+    Console.WriteLine($"  {p.Id} {p.Sku,-10} {p.Name,-22} {p.Quantity,5} {p.Unit}");
+
+Console.WriteLine();
+Console.WriteLine("=== Сценарій 2: відмови ===");
+TryDo("Receive з неіснуючим id", () => service.Receive("no-such-id", 5));
+TryDo("дубль id у сховищі", () => store.Add(Product.Create(created.Id, "SKU-X", "Дубль", "шт", 1)));
+TryDo("видача більша за залишок", () => service.Issue(created.Id, 100000));
 
 return 0;
 
