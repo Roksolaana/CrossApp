@@ -1,8 +1,7 @@
-﻿using Core;
-using Core.Abstractions;
-using Core.Domain;
+﻿using Core.Domain;
 using Core.Dto;
 using Core.Import;
+using Core.Abstractions;
 using Core.Services;
 using Core.Storage;
 
@@ -95,7 +94,6 @@ if (args.Contains("--mixed"))
     return 0;
 }
 
-// ===== Лаб. 3: імпорт тепер під прапорцем --import =====
 if (args.Contains("--import"))
 {
     string[] importArgs = args.Where(a => a != "--import").ToArray();
@@ -129,20 +127,12 @@ if (args.Contains("--import"))
     return 0;
 }
 
-// ===== Лаб. 5: composition root (режим за замовчуванням) =====
-bool useFile = args.Contains("--file");
-string dataPath = Path.Combine(AppContext.BaseDirectory, "data", "catalog.json");
-
-// Єдине місце, де створюються конкретні класи сховища
-ICatalogStore store = useFile
-    ? new FileCatalogStore(dataPath)
-    : new InMemoryCatalogStore(SampleData.Products());
-
+ICatalogStore store = StoreFactory.Create(args);
 var service = new CatalogService(store);
 
-Console.WriteLine($"Сховище: {store.GetType().Name}");
-if (useFile)
-    Console.WriteLine($"Файл: {dataPath}");
+Console.WriteLine($"Сховище: {Describe(store)}");
+if (args.Contains("--file"))
+    Console.WriteLine($"Файл: {StoreFactory.DataPath}");
 
 Console.WriteLine();
 Console.WriteLine("=== Сценарій 1: успіх ===");
@@ -160,7 +150,44 @@ TryDo("Receive з неіснуючим id", () => service.Receive("no-such-id", 
 TryDo("дубль id у сховищі", () => store.Add(Product.Create(created.Id, "SKU-X", "Дубль", "шт", 1)));
 TryDo("видача більша за залишок", () => service.Issue(created.Id, 100000));
 
+Console.WriteLine();
+Console.WriteLine("=== Сценарій 3: пошук (Func<Product, bool>) ===");
+Show("залишок менше 50", x => x.Quantity < 50);
+Show("назва містить 'каб'", x => x.Name.Contains("каб", StringComparison.OrdinalIgnoreCase));
+Show("одиниця = 'м'", x => x.Unit == "м");
+
+if (store is CachingCatalogStore cached)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 4: кеш (декоратор) ===");
+
+    store.Update(created);
+    int hits0 = cached.Hits, misses0 = cached.Misses;
+    service.All();
+    service.All();
+    service.All();
+    Console.WriteLine($"  3 виклики All(): до внутрішнього сховища = {cached.Misses - misses0}, з кешу = {cached.Hits - hits0}");
+
+    store.Update(created);
+    hits0 = cached.Hits; misses0 = cached.Misses;
+    service.All();
+    Console.WriteLine($"  All() після зміни: до внутрішнього сховища = {cached.Misses - misses0}, з кешу = {cached.Hits - hits0}");
+}
+
 return 0;
+
+void Show(string title, Func<Product, bool> predicate)
+{
+    var found = service.Search(predicate);
+    Console.WriteLine($"  {title}: {found.Count}");
+    foreach (var item in found)
+        Console.WriteLine($"    {item.Id} {item.Sku,-10} {item.Name,-22} {item.Quantity,5} {item.Unit}");
+}
+
+static string Describe(ICatalogStore s) =>
+    s is CachingCatalogStore c
+        ? $"{nameof(CachingCatalogStore)} -> {c.InnerName}"
+        : s.GetType().Name;
 
 static void TryDo(string title, Action action)
 {

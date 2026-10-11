@@ -575,3 +575,48 @@ dotnet run --project src/Cli -- --movement
 - Контейнер DI (`Microsoft.Extensions.DependencyInjection`) не використовується:
   залежності з'єднуються вручну через `new` у `Program.cs`.
 - Кирилиця у `catalog.json` записується як `\uXXXX` — штатне екранування `System.Text.Json`.
+### Додаткові завдання (лаб. 5)
+
+#### 1. Декоратор `CachingCatalogStore`
+
+Клас `src/Core/Storage/CachingCatalogStore.cs` реалізує `ICatalogStore` і приймає інший `ICatalogStore`
+у конструкторі. Сам нічого не зберігає: кешує результати `List()` та `GetById()` і делегує роботу
+внутрішньому сховищу. Після `Add`, `Update`, `Remove` кеш скидається. Працює над будь-якою реалізацією
+(`InMemoryCatalogStore` або `FileCatalogStore`), `CatalogService` для цього не змінювався.
+
+Схема: `Cli → CatalogService → ICatalogStore → CachingCatalogStore → InMemory | File`
+
+#### 2. Пошук з `Func<Product, bool>`
+
+Метод `CatalogService.Search(Func<Product, bool> predicate)` повертає товари, для яких умова істинна.
+Метод не входить до інтерфейсу `ICatalogStore` (контракт лишається мінімальним): пошук будується
+на `List()` і працює з будь-яким сховищем.
+
+Приклад: `service.Search(x => x.Quantity < 50)`.
+
+#### 3. Фабрика `StoreFactory.Create(args)`
+
+Клас `src/Cli/StoreFactory.cs` за аргументами командного рядка створює потрібну реалізацію сховища
+(`--file`, `--cache`). `Program.cs` отримує лише `ICatalogStore` і не містить `new ...Store(...)`.
+
+Порівняння з варіантом «усе в Program.cs»:
+
+| | Усе в `Program.cs` | `StoreFactory.Create(args)` |
+|---|---|---|
+| Простота | найпростіше, все в одному місці | додатковий файл |
+| Зростання кількості опцій | `Program.cs` роздувається | зміни лише у фабриці |
+| Читабельність `Program.cs` | гірша при багатьох опціях | один рядок створення сховища |
+| Composition root | один файл | розділений між `Program.cs` і фабрикою (обидва в Cli) |
+
+Висновок: для двох реалізацій достатньо тернарного оператора в `Program.cs`; фабрика виправдана,
+коли з'являються додаткові опції (кеш, база даних).
+
+#### Запуск
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli -- --cache` | кеш над сховищем у пам'яті |
+| `dotnet run --project src/Cli -- --file --cache` | кеш над файловим сховищем |
+
+У виводі з `--cache` є сценарій 4: три виклики `All()` дають 1 звернення до внутрішнього сховища
+і 2 з кешу; після зміни кеш скидається.
