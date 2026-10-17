@@ -4,14 +4,20 @@ using Core.Events;
 
 namespace Core.Services;
 
-public sealed class CatalogService(ICatalogStore store)
+public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificationSink>? sinks = null)
 {
     private readonly ICatalogStore _store = store ?? throw new ArgumentNullException(nameof(store));
+    private readonly List<INotificationSink> _sinks = sinks?.ToList() ?? [];
 
     public event EventHandler<CatalogChangedEventArgs>? Changed;
 
-    private void OnChanged(Product p, CatalogChangeKind kind, int delta, int? quantityAfter = null) =>
-        Changed?.Invoke(this, new CatalogChangedEventArgs(p.Id, kind, delta, quantityAfter ?? p.Quantity));
+    private void OnChanged(Product p, CatalogChangeKind kind, int delta, int? quantityAfter = null)
+    {
+        var args = new CatalogChangedEventArgs(p.Id, kind, delta, quantityAfter ?? p.Quantity);
+        Changed?.Invoke(this, args);
+        foreach (var sink in _sinks)
+            sink.Notify(args);
+    }
 
     public Product Add(string sku, string name, string unit, int quantity)
     {

@@ -161,6 +161,11 @@ if (args.Contains("--events"))
     Console.WriteLine($"Подій отримано: {changes}");
 
     Console.WriteLine();
+    Console.WriteLine("=== Відмова при активній підписці ===");
+    TryDo("Receive з від'ємною кількістю", () => eventService.Receive(newItem.Id, -5));
+    Console.WriteLine($"Подій отримано: {changes}");
+
+    Console.WriteLine();
     Console.WriteLine("=== Сценарій 2: після відписки (-=) ===");
     eventService.Changed -= OnCatalogChanged;
     eventService.Receive(newItem.Id, 5);
@@ -179,6 +184,61 @@ if (args.Contains("--events"))
     Console.WriteLine($"  залишок менше 50: {low.Count}");
     foreach (var item in low)
         Console.WriteLine($"    {item.Id} {item.Sku,-10} {item.Name,-22} {item.Quantity,5} {item.Unit}");
+
+    return 0;
+}
+if (args.Contains("--sinks"))
+{
+    var sinkLogPath = Path.Combine(AppContext.BaseDirectory, "logs", "sinks.log");
+    INotificationSink[] sinks = [new ConsoleSink(), new FileSink(sinkLogPath)];
+
+    var sinkStore = StoreFactory.Create(args);
+    var sinkService = new CatalogService(sinkStore, sinks);
+
+    Console.WriteLine($"Сховище: {sinkStore.GetType().Name}");
+    Console.WriteLine($"Файл логу: {sinkLogPath}");
+    Console.WriteLine();
+
+    Console.WriteLine("=== Сценарій 1: успішні зміни (ConsoleSink + FileSink) ===");
+    var sinkItem = sinkService.Add("SKU-201", "Розетка подвійна", "шт", 40);
+    sinkService.Receive(sinkItem.Id, 10);
+    sinkService.Issue(sinkItem.Id, 5);
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 2: відмови (рядків sink-ів немає) ===");
+        TryDo("Receive з від'ємною кількістю", () => sinkService.Receive(sinkItem.Id, -5));
+    TryDo("Receive з неіснуючим id", () => sinkService.Receive("no-such-id", 5));
+    TryDo("видача більша за залишок", () => sinkService.Issue(sinkItem.Id, 100000));
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 3: видалення (подія Removed) ===");
+    sinkService.Remove(sinkItem.Id);
+
+    return 0;
+}
+if (args.Contains("--import-report"))
+{
+    string[] reportArgs = args.Where(a => a != "--import-report").ToArray();
+    string reportPath = reportArgs.Length > 0 ? reportArgs[0] : Path.Combine("data", "sample.csv");
+
+    if (!File.Exists(reportPath))
+    {
+        Console.WriteLine($"Файл не знайдено: {Path.GetFullPath(reportPath)}");
+        return 1;
+    }
+
+    int skipped = 0;
+    var reportResult = ImportWithReport.Load(reportPath, message =>
+    {
+        skipped++;
+        Console.WriteLine($"  пропущено #{skipped}: {message}");
+    });
+
+    Console.WriteLine($"Прийнято: {reportResult.Items.Count}, пропущено: {skipped}");
+
+    var collected = new List<string>();
+    ImportWithReport.Load(reportPath, collected.Add);
+    Console.WriteLine($"Той самий метод з іншим Action: зібрано повідомлень {collected.Count}");
 
     return 0;
 }
