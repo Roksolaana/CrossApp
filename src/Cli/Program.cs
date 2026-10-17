@@ -4,6 +4,7 @@ using Core.Import;
 using Core.Abstractions;
 using Core.Services;
 using Core.Storage;
+using Core.Events;
 
 if (args.Contains("--domain"))
 {
@@ -126,6 +127,61 @@ if (args.Contains("--import"))
 
     return 0;
 }
+if (args.Contains("--events"))
+{
+    var eventStore = StoreFactory.Create(args);
+    var eventService = new CatalogService(eventStore);
+
+    var logPath = Path.Combine(AppContext.BaseDirectory, "logs", "app.log");
+    Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+    void OnCatalogChanged(object? sender, CatalogChangedEventArgs e)
+    {
+        var line = $"{e.At:HH:mm:ss} {e.Kind,-8} {e.Id} {e.Delta,4:+0;-0} → залишок {e.QuantityAfter}";
+        Console.WriteLine(line);
+        File.AppendAllText(logPath, line + Environment.NewLine);
+    }
+
+    Console.WriteLine($"Сховище: {eventStore.GetType().Name}");
+    Console.WriteLine($"Лог: {logPath}");
+    Console.WriteLine();
+
+    int changes = 0;
+    eventService.Changed += OnCatalogChanged;
+    eventService.Changed += (_, _) =>
+    {
+        changes++;
+        Console.WriteLine($"    (лічильник: {changes})");
+    };
+
+    Console.WriteLine("=== Сценарій 1: успішні зміни (два підписники) ===");
+    var newItem = eventService.Add("SKU-101", "Кабель UTP cat6", "м", 50);
+    eventService.Receive(newItem.Id, 25);
+    eventService.Issue(newItem.Id, 10);
+    Console.WriteLine($"Подій отримано: {changes}");
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 2: після відписки (-=) ===");
+    eventService.Changed -= OnCatalogChanged;
+    eventService.Receive(newItem.Id, 5);
+    Console.WriteLine($"Подій отримано: {changes}");
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 3: відмови (подій немає) ===");
+    TryDo("Receive з від'ємною кількістю", () => eventService.Receive(newItem.Id, -5));
+    TryDo("Receive з неіснуючим id", () => eventService.Receive("no-such-id", 5));
+    TryDo("видача більша за залишок", () => eventService.Issue(newItem.Id, 100000));
+    Console.WriteLine($"Подій отримано: {changes}");
+
+    Console.WriteLine();
+    Console.WriteLine("=== Сценарій 4: Func замість події (FindAll) ===");
+    var low = eventService.FindAll(p => p.Quantity < 50);
+    Console.WriteLine($"  залишок менше 50: {low.Count}");
+    foreach (var item in low)
+        Console.WriteLine($"    {item.Id} {item.Sku,-10} {item.Name,-22} {item.Quantity,5} {item.Unit}");
+
+    return 0;
+}
 
 ICatalogStore store = StoreFactory.Create(args);
 var service = new CatalogService(store);
@@ -178,7 +234,7 @@ return 0;
 
 void Show(string title, Func<Product, bool> predicate)
 {
-    var found = service.Search(predicate);
+    var found = service.FindAll(predicate);
     Console.WriteLine($"  {title}: {found.Count}");
     foreach (var item in found)
         Console.WriteLine($"    {item.Id} {item.Sku,-10} {item.Name,-22} {item.Quantity,5} {item.Unit}");

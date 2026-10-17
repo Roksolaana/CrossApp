@@ -620,3 +620,37 @@ dotnet run --project src/Cli -- --movement
 
 У виводі з `--cache` є сценарій 4: три виклики `All()` дають 1 звернення до внутрішнього сховища
 і 2 з кешу; після зміни кеш скидається.
+
+## Лабораторна 6: доменні події, делегати, лямбди
+
+### Подія
+
+- Тип даних події: `CatalogChangedEventArgs` (`Id`, `Kind`, `Delta`, `QuantityAfter`, `At`)
+  і перелічення `CatalogChangeKind` (`Added`, `Received`, `Issued`, `Removed`)
+  у `src/Core/Events`
+- Подія: `CatalogService.Changed` (`EventHandler<CatalogChangedEventArgs>`)
+- Піднімається методом `OnChanged` лише після успішної зміни стану:
+  якщо інваріант кинув виняток, події немає
+- Core не пише в консоль і не пише в лог-файл
+
+### Підписники (Cli)
+
+1. `OnCatalogChanged` (локальна функція): виводить рядок у консоль і дописує його в `logs/app.log`
+2. Лямбда-лічильник із замиканням над змінною `changes`
+
+Відписка: `service.Changed -= OnCatalogChanged`.
+
+### Func
+
+`CatalogService.FindAll(Func<Product, bool> predicate)` повертає товари за довільною умовою
+(замінює `Search` з лаб. 5).
+
+### Запуск
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli -- --events` | сценарій подій, сховище в пам'яті |
+| `dotnet run --project src/Cli -- --events --file` | те саме над файловим сховищем |
+
+Лог: `<каталог виводу>/logs/app.log` (наприклад, `src/Cli/bin/Debug/net10.0/logs/app.log`);
+повний шлях виводиться в консоль.
