@@ -5,6 +5,7 @@ using Core.Abstractions;
 using Core.Services;
 using Core.Storage;
 using Core.Events;
+using Core.Reports;
 
 if (args.Contains("--domain"))
 {
@@ -127,6 +128,7 @@ if (args.Contains("--import"))
 
     return 0;
 }
+
 if (args.Contains("--events"))
 {
     var eventStore = StoreFactory.Create(args);
@@ -187,6 +189,7 @@ if (args.Contains("--events"))
 
     return 0;
 }
+
 if (args.Contains("--sinks"))
 {
     var sinkLogPath = Path.Combine(AppContext.BaseDirectory, "logs", "sinks.log");
@@ -206,7 +209,7 @@ if (args.Contains("--sinks"))
 
     Console.WriteLine();
     Console.WriteLine("=== Сценарій 2: відмови (рядків sink-ів немає) ===");
-        TryDo("Receive з від'ємною кількістю", () => sinkService.Receive(sinkItem.Id, -5));
+    TryDo("Receive з від'ємною кількістю", () => sinkService.Receive(sinkItem.Id, -5));
     TryDo("Receive з неіснуючим id", () => sinkService.Receive("no-such-id", 5));
     TryDo("видача більша за залишок", () => sinkService.Issue(sinkItem.Id, 100000));
 
@@ -216,6 +219,7 @@ if (args.Contains("--sinks"))
 
     return 0;
 }
+
 if (args.Contains("--import-report"))
 {
     string[] reportArgs = args.Where(a => a != "--import-report").ToArray();
@@ -239,6 +243,64 @@ if (args.Contains("--import-report"))
     var collected = new List<string>();
     ImportWithReport.Load(reportPath, collected.Add);
     Console.WriteLine($"Той самий метод з іншим Action: зібрано повідомлень {collected.Count}");
+
+    return 0;
+}
+
+if (args.Any(a => a.StartsWith("report-")))
+{
+    var reportStore = StoreFactory.Create(args);
+    var reportService = new CatalogService(reportStore);
+    var reportItems = reportService.All();
+    var command = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "report-top";
+
+    switch (command)
+    {
+        case "report-top":
+            PrintLines(ReportService.TopByQuantity(reportItems, 5));
+            break;
+
+        case "report-low":
+            PrintLines(ReportService.LowStock(reportItems, 10));
+            break;
+
+        case "report-groups":
+            foreach (var g in ReportService.ByUnit(reportItems))
+                Console.WriteLine($"  {g.Key,-6} позицій: {g.Count,3} сумарно: {g.TotalQuantity,6}");
+            break;
+
+        case "report-sum":
+        {
+            var totals = ReportService.Totals(reportItems);
+            Console.WriteLine($"  позицій {totals.Items}, всього {totals.Total}, середнє {totals.Average:F2}, макс {totals.Max}");
+            break;
+        }
+
+        case "report-lazy":
+        {
+            var demo = DeferredExecutionDemo.Run(reportItems);
+            Console.WriteLine($"  Дефіцитних до змін: {demo.BeforeChange}");
+            Console.WriteLine($"  Дефіцитних після змін: {demo.AfterChange}");
+            Console.WriteLine($"  У знімку лишилось: {demo.SnapshotCount}");
+            Console.WriteLine($"  Запит після очищення джерела: {demo.QueryAfterClear}");
+            break;
+        }
+
+        case "report-empty":
+        {
+            var none = Array.Empty<Product>();
+            var emptyTotals = ReportService.Totals(none);
+            Console.WriteLine($"  report-low: {ReportService.LowStock(none, 10).Count} рядків");
+            Console.WriteLine($"  report-top: {ReportService.TopByQuantity(none, 5).Count} рядків");
+            Console.WriteLine($"  report-groups: {ReportService.ByUnit(none).Count} груп");
+            Console.WriteLine($"  report-sum: позицій {emptyTotals.Items}, всього {emptyTotals.Total}, середнє {emptyTotals.Average:F2}, макс {emptyTotals.Max}");
+            break;
+        }
+
+        default:
+            Console.WriteLine("report-top | report-low | report-groups | report-sum | report-lazy | report-empty");
+            break;
+    }
 
     return 0;
 }
@@ -304,6 +366,12 @@ static string Describe(ICatalogStore s) =>
     s is CachingCatalogStore c
         ? $"{nameof(CachingCatalogStore)} -> {c.InnerName}"
         : s.GetType().Name;
+
+static void PrintLines(IReadOnlyList<StockLine> lines)
+{
+    foreach (var l in lines)
+        Console.WriteLine($"  {l.Sku,-10} {l.Name,-22} {l.Quantity,6} {l.Unit}");
+}
 
 static void TryDo(string title, Action action)
 {

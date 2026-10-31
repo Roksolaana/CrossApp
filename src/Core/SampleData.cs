@@ -21,5 +21,10 @@ public static class SampleData
         Product.Create("P-013", "SKU-013", "Утеплювач 50мм", "м2", 400),
         Product.Create("P-014", "SKU-014", "Саморізи 4x35", "уп", 250),
         Product.Create("P-015", "SKU-015", "Дошка обрізна 50x150", "м3", 12),
+        Product.Create("P-016", "SKU-016", "Скоба будівельна", "уп", 6),
+        Product.Create("P-017", "SKU-017", "Герметик силіконовий", "шт", 8),
+        Product.Create("P-018", "SKU-018", "Труба ПВХ 50мм", "м", 300),
+        Product.Create("P-019", "SKU-019", "Лак паркетний", "л", 7),
+        Product.Create("P-020", "SKU-020", "Розчинник 1л", "л", 40),
     ];
 }
