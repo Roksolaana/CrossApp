@@ -98,7 +98,7 @@ if (args.Contains("--mixed"))
 
 if (args.Contains("--import"))
 {
-    string[] importArgs = args.Where(a => a != "--import").ToArray();
+    string[] importArgs = args.Except(new[] { "--import" }).ToArray();
     string path = importArgs.Length > 0 ? importArgs[0] : Path.Combine("data", "sample.csv");
 
     if (!File.Exists(path))
@@ -222,7 +222,7 @@ if (args.Contains("--sinks"))
 
 if (args.Contains("--import-report"))
 {
-    string[] reportArgs = args.Where(a => a != "--import-report").ToArray();
+    string[] reportArgs = args.Except(new[] { "--import-report" }).ToArray();
     string reportPath = reportArgs.Length > 0 ? reportArgs[0] : Path.Combine("data", "sample.csv");
 
     if (!File.Exists(reportPath))
@@ -270,35 +270,80 @@ if (args.Any(a => a.StartsWith("report-")))
             break;
 
         case "report-sum":
-        {
-            var totals = ReportService.Totals(reportItems);
-            Console.WriteLine($"  позицій {totals.Items}, всього {totals.Total}, середнє {totals.Average:F2}, макс {totals.Max}");
-            break;
-        }
+            {
+                var totals = ReportService.Totals(reportItems);
+                Console.WriteLine($"  позицій {totals.Items}, всього {totals.Total}, середнє {totals.Average:F2}, макс {totals.Max}");
+                break;
+            }
 
         case "report-lazy":
-        {
-            var demo = DeferredExecutionDemo.Run(reportItems);
-            Console.WriteLine($"  Дефіцитних до змін: {demo.BeforeChange}");
-            Console.WriteLine($"  Дефіцитних після змін: {demo.AfterChange}");
-            Console.WriteLine($"  У знімку лишилось: {demo.SnapshotCount}");
-            Console.WriteLine($"  Запит після очищення джерела: {demo.QueryAfterClear}");
-            break;
-        }
+            {
+                var demo = DeferredExecutionDemo.Run(reportItems);
+                Console.WriteLine($"  Дефіцитних до змін: {demo.BeforeChange}");
+                Console.WriteLine($"  Дефіцитних після змін: {demo.AfterChange}");
+                Console.WriteLine($"  У знімку лишилось: {demo.SnapshotCount}");
+                Console.WriteLine($"  Запит після очищення джерела: {demo.QueryAfterClear}");
+                break;
+            }
 
         case "report-empty":
-        {
-            var none = Array.Empty<Product>();
-            var emptyTotals = ReportService.Totals(none);
-            Console.WriteLine($"  report-low: {ReportService.LowStock(none, 10).Count} рядків");
-            Console.WriteLine($"  report-top: {ReportService.TopByQuantity(none, 5).Count} рядків");
-            Console.WriteLine($"  report-groups: {ReportService.ByUnit(none).Count} груп");
-            Console.WriteLine($"  report-sum: позицій {emptyTotals.Items}, всього {emptyTotals.Total}, середнє {emptyTotals.Average:F2}, макс {emptyTotals.Max}");
-            break;
-        }
+            {
+                var none = Array.Empty<Product>();
+                var emptyTotals = ReportService.Totals(none);
+                Console.WriteLine($"  report-low: {ReportService.LowStock(none, 10).Count} рядків");
+                Console.WriteLine($"  report-top: {ReportService.TopByQuantity(none, 5).Count} рядків");
+                Console.WriteLine($"  report-groups: {ReportService.ByUnit(none).Count} груп");
+                Console.WriteLine($"  report-sum: позицій {emptyTotals.Items}, всього {emptyTotals.Total}, середнє {emptyTotals.Average:F2}, макс {emptyTotals.Max}");
+                break;
+            }
+        case "report-moves":
+            {
+                var movements = Core.SampleData.Movements();
 
+                Console.WriteLine("  Join: переміщення разом з товарами");
+                foreach (var line in ReportService.MovementLines(reportItems, movements))
+                    Console.WriteLine($"    {line.MovementId,-6} {line.Sku,-10} {line.Name,-22} {line.Amount,5} {line.Status}");
+
+                Console.WriteLine();
+                Console.WriteLine("  GroupJoin: топ-3 товари за сумою переміщень");
+                foreach (var item in ReportService.TopMoved(reportItems, movements, 3))
+                    Console.WriteLine($"    {item.Sku,-10} {item.Name,-22} переміщень: {item.MovementsCount,2} сумарно: {item.TotalAmount,5}");
+
+                Console.WriteLine();
+                Console.WriteLine($"  Товарів у GroupJoin: {ReportService.MovementTotals(reportItems, movements).Count} (Join дав лише ті, що мають переміщення)");
+                break;
+            }
+
+        case "report-query":
+            {
+                var byMethod = ReportService.ByUnit(reportItems);
+                var byQuery = ReportService.ByUnitQuerySyntax(reportItems);
+
+                Console.WriteLine("  Методний синтаксис:");
+                foreach (var g in byMethod)
+                    Console.WriteLine($"    {g.Key,-6} позицій: {g.Count,3} сумарно: {g.TotalQuantity,6}");
+
+                Console.WriteLine("  Синтаксис запитів:");
+                foreach (var g in byQuery)
+                    Console.WriteLine($"    {g.Key,-6} позицій: {g.Count,3} сумарно: {g.TotalQuantity,6}");
+
+                Console.WriteLine($"  Результати однакові: {byMethod.SequenceEqual(byQuery)}");
+                break;
+            }
+
+        case "report-bench":
+            {
+                Console.WriteLine("  Генерація 100000 записів і вимірювання (середнє з кількох повторів)...");
+                var rows = LinqBenchmark.Run();
+                foreach (var r in rows)
+                    Console.WriteLine($"  {r.Name,-42} {r.AverageMs,9:F2} мс   контрольна сума: {r.Checksum}");
+
+                Console.WriteLine($"  Варіанти 1 і 2 дали однаковий результат: {rows[0].Checksum == rows[1].Checksum}");
+                Console.WriteLine($"  Варіанти 3 і 4 дали однаковий результат: {rows[2].Checksum == rows[3].Checksum}");
+                break;
+            }
         default:
-            Console.WriteLine("report-top | report-low | report-groups | report-sum | report-lazy | report-empty");
+            Console.WriteLine("report-top | report-low | report-groups | report-sum | report-lazy | report-empty | report-moves | report-query | report-bench");
             break;
     }
 
