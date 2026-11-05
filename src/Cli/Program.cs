@@ -251,6 +251,7 @@ if (args.Contains("--import-report"))
 if (args.Contains("--import-async"))
 {
     var impArgs = args.Where(a => a != "--import-async").ToList();
+    bool impStream = impArgs.Remove("--stream");
 
     int impCancelAfterMs = 0;
     int impIdx = impArgs.IndexOf("--cancel-after");
@@ -259,6 +260,15 @@ if (args.Contains("--import-async"))
         if (impIdx + 1 < impArgs.Count)
             int.TryParse(impArgs[impIdx + 1], out impCancelAfterMs);
         impArgs.RemoveRange(impIdx, Math.Min(2, impArgs.Count - impIdx));
+    }
+
+    int impTimeoutMs = 0;
+    int impTimeoutIdx = impArgs.IndexOf("--timeout");
+    if (impTimeoutIdx >= 0)
+    {
+        if (impTimeoutIdx + 1 < impArgs.Count)
+            int.TryParse(impArgs[impTimeoutIdx + 1], out impTimeoutMs);
+        impArgs.RemoveRange(impTimeoutIdx, Math.Min(2, impArgs.Count - impTimeoutIdx));
     }
 
     string impPath = impArgs.Count > 0 ? impArgs[0] : Path.Combine("data", "sample.json");
@@ -279,12 +289,37 @@ if (args.Contains("--import-async"))
     if (impCancelAfterMs > 0)
         impCts.CancelAfter(impCancelAfterMs);
 
+    bool impProgressDrawn = false;
+    var impProgress = new SyncProgress<int>(impPercent =>
+    {
+        impProgressDrawn = true;
+        Console.Write($"\rПрогрес: {impPercent,3}%");
+    });
+
     try
     {
-        int impCount = await impService.ImportAsync(impImporter, impPath, impCts.Token);
+        Func<IProgress<int>?, Task<int>> impRun = impProg =>
+            impTimeoutMs > 0
+                ? impService.ImportWithTimeoutAsync(
+                    impImporter, impPath, TimeSpan.FromMilliseconds(impTimeoutMs), impCts.Token, impProg)
+                : impStream
+                    ? impService.ImportStreamAsync(impImporter, impPath, impCts.Token)
+                    : impService.ImportAsync(impImporter, impPath, impCts.Token, impProg);
+
+        int impCount;
+        try
+        {
+            impCount = await impRun(impProgress);
+        }
+        finally
+        {
+            if (impProgressDrawn)
+                Console.WriteLine();
+        }
+
         Console.WriteLine($"Імпортовано записів: {impCount}");
 
-        int impAgain = await impService.ImportAsync(impImporter, impPath, impCts.Token);
+        int impAgain = await impRun(null);
         Console.WriteLine($"Повторний імпорт того самого файлу: {impAgain}");
 
         Console.WriteLine($"Усього в каталозі: {impService.All().Count}");
@@ -295,9 +330,15 @@ if (args.Contains("--import-async"))
         Console.WriteLine($"Імпорт скасовано. У каталозі встигло з'явитись: {impService.All().Count}");
         return 2;
     }
+    catch (TimeoutException ex)
+    {
+        Console.WriteLine($"Час вичерпано: {ex.Message}");
+        return 6;
+    }
     catch (DomainException ex)
     {
         Console.WriteLine($"Дані відхилено: {ex.Message}");
+        Console.WriteLine($"  У каталозі лишилось записів: {impService.All().Count}");
         return 3;
     }
     catch (FileNotFoundException)

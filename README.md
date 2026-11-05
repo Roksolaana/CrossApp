@@ -892,3 +892,64 @@ dotnet test
 - `TopByQuantity_IsDeterministic`: топ-N з однаковим результатом
 - `ImportAsync_WhenAlreadyCancelled_Throws`: скасований токен
 - `ImportAsync_WithBadRecord_ThrowsDomainException_AndAddsNothing`: поганий запис у тимчасовому файлі
+### Додаткові завдання (лаб. 8)
+
+#### 1. Потоковий імпорт (`IAsyncEnumerable`)
+
+`ICatalogImporter.LoadStreamAsync` повертає `IAsyncEnumerable<Product>`: записи віддаються по одному
+(`DeserializeAsyncEnumerable` + `yield return`), весь файл не тримається в пам'яті. Токен приходить
+через `[EnumeratorCancellation]` на параметрі, а в `CatalogService.ImportStreamAsync` споживається
+через `await foreach ... .WithCancellation(ct)`.
+
+Компроміс: потоковий імпорт не атомарний. При поганому записі №3 записи 1 і 2 уже додані
+(звичайний `ImportAsync` у цьому випадку не додає нічого). Скасування на великому файлі лишає
+частину записів у каталозі.
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli -- --import-async data/bad.json --stream` | `Дані відхилено: Запис 3...`, у каталозі лишилось 2 |
+| `dotnet run --project src/Cli -- --import-async data/bad.json` | те саме повідомлення, у каталозі 0 |
+| `dotnet run --project src/Cli -- --import-async data/big.json --stream --cancel-after 300` | скасовано, у каталозі встигло з'явитись частину записів (наприклад, 65274) |
+
+#### 2. Зв'язані токени і таймаут
+
+`CatalogService.ImportWithTimeoutAsync` створює `CancellationTokenSource(timeout)` і зв'язує його з
+токеном користувача через `CancellationTokenSource.CreateLinkedTokenSource`. Фільтр
+`catch ... when (timeoutCts.IsCancellationRequested && !userToken.IsCancellationRequested)`
+перетворює скасування від таймера на `TimeoutException`, а скасування користувачем лишається
+`OperationCanceledException`. Тести (`TimeoutTests`) з імпортером, що чекає безкінечно, доводять обидва
+випадки без диска.
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli -- --import-async data/big.json --timeout 30` | `Час вичерпано: Імпорт перевищив ліміт часу 30 мс.` |
+| `dotnet run --project src/Cli -- --import-async data/big.json --timeout 60000` | імпортовано 200000 |
+| `dotnet run --project src/Cli -- --import-async data/big.json --cancel-after 30` | `Імпорт скасовано.` |
+
+#### 3. `IProgress<int>`
+
+`ImportAsync` і `ImportWithTimeoutAsync` приймають необов'язковий `IProgress<int>` і звітують про відсоток
+лише коли він змінився (не 200000 разів, а не більше 100). `Core` нічого не знає про консоль.
+У Cli використано власний синхронний `SyncProgress<T>` замість `Progress<T>`: у консольному застосунку
+немає `SynchronizationContext`, і `Progress<T>` викликав би обробник з пулу потоків, тому відсотки
+могли б з'явитись пізніше за наступний вивід. У потоковому режимі відсотків немає, бо загальна
+кількість записів наперед невідома. Тести: 4 записи дають послідовність 25, 50, 75, 100.
+
+`dotnet run --project src/Cli -- --import-async data/sample.json` виводить `Прогрес: 100%` (проміжні
+значення перемальовуються на одному рядку), потім `Імпортовано записів: 3`.
+
+#### 4. Покриття тестами
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+Загальне покриття `Core`: 26,9% рядків (185 з 688) і 21,8% гілок (43 з 197). Повністю покрито
+`JsonCatalogImporter`; `InMemoryCatalogStore` 77%, `Product` 60%, `CatalogService` 43%, `ReportService` 16%.
+Не покрито код попередніх лабораторних (CSV-імпортери, файлове й кешуюче сховища, `Movement`,
+`Warehouse`, `WarehouseService`) і демонстраційний код (`DeferredExecutionDemo`, `LinqBenchmark`,
+`EnvironmentInfo`, `SampleData`). Це прийнятно: тести цієї лабораторної цілять у нову логіку (імпорт,
+скасування, події, винятки, звіти), а решта перевіряється сценаріями Cli, працює з диском або консоллю.
+Покриття не є самоціллю: 100% не гарантує коректності.
+
+Після додаткових завдань `dotnet test` дає `total: 13; failed: 0`.

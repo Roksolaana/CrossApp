@@ -27,8 +27,9 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         return product;
     }
 
-    public async Task<int> ImportAsync(
-        ICatalogImporter importer, string path, CancellationToken ct = default)
+        public async Task<int> ImportAsync(
+        ICatalogImporter importer, string path,
+        CancellationToken ct = default, IProgress<int>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(importer);
         ct.ThrowIfCancellationRequested();
@@ -36,7 +37,39 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         var items = await importer.LoadAsync(path, ct);
 
         var imported = 0;
+        var processed = 0;
+        var lastPercent = -1;
+
         foreach (var item in items)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (_store.GetById(item.Id) is null)
+            {
+                _store.Add(item);
+                OnChanged(item, CatalogChangeKind.Added, item.Quantity);
+                imported++;
+            }
+
+            processed++;
+            var percent = processed * 100 / items.Count;
+            if (percent != lastPercent)
+            {
+                lastPercent = percent;
+                progress?.Report(percent);
+            }
+        }
+
+        return imported;
+    }
+
+    public async Task<int> ImportStreamAsync(
+        ICatalogImporter importer, string path, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+
+        var imported = 0;
+        await foreach (var item in importer.LoadStreamAsync(path).WithCancellation(ct))
         {
             ct.ThrowIfCancellationRequested();
 
@@ -49,6 +82,26 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         }
 
         return imported;
+    }
+
+        public async Task<int> ImportWithTimeoutAsync(
+        ICatalogImporter importer, string path, TimeSpan timeout,
+        CancellationToken userToken = default, IProgress<int>? progress = null)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            userToken, timeoutCts.Token);
+
+        try
+        {
+            return await ImportAsync(importer, path, linked.Token, progress);
+        }
+        catch (OperationCanceledException)
+            when (timeoutCts.IsCancellationRequested && !userToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Імпорт перевищив ліміт часу {timeout.TotalMilliseconds:0} мс.");
+        }
     }
     
     public void Receive(string id, int quantity)

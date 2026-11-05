@@ -2,6 +2,7 @@ using System.Text.Json;
 using Core.Abstractions;
 using Core.Domain;
 using Core.Dto;
+using System.Runtime.CompilerServices;
 
 namespace Core.Storage;
 
@@ -47,5 +48,39 @@ public sealed class JsonCatalogImporter : ICatalogImporter
         }
 
         return result;
+    }
+        public async IAsyncEnumerable<Product> LoadStreamAsync(
+        string path,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        await using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            bufferSize: 4096, useAsync: true);
+
+        var number = 0;
+
+        await foreach (var dto in JsonSerializer.DeserializeAsyncEnumerable<ProductDto>(
+                           stream, Options, ct))
+        {
+            ct.ThrowIfCancellationRequested();
+            number++;
+
+            if (dto is null)
+                throw new DomainException($"Запис {number}: порожній елемент.");
+
+            Product product;
+            try
+            {
+                product = Product.FromDto(dto);
+            }
+            catch (ArgumentException ex)
+            {
+                throw new DomainException($"Запис {number}: {ex.Message}", ex);
+            }
+
+            yield return product;
+        }
     }
 }
