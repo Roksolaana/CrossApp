@@ -6,6 +6,8 @@ using Core.Services;
 using Core.Storage;
 using Core.Events;
 using Core.Reports;
+using System.Text.Json;
+using Core;
 
 if (args.Contains("--domain"))
 {
@@ -245,6 +247,78 @@ if (args.Contains("--import-report"))
     Console.WriteLine($"Той самий метод з іншим Action: зібрано повідомлень {collected.Count}");
 
     return 0;
+}
+if (args.Contains("--import-async"))
+{
+    var impArgs = args.Where(a => a != "--import-async").ToList();
+
+    int impCancelAfterMs = 0;
+    int impIdx = impArgs.IndexOf("--cancel-after");
+    if (impIdx >= 0)
+    {
+        if (impIdx + 1 < impArgs.Count)
+            int.TryParse(impArgs[impIdx + 1], out impCancelAfterMs);
+        impArgs.RemoveRange(impIdx, Math.Min(2, impArgs.Count - impIdx));
+    }
+
+    string impPath = impArgs.Count > 0 ? impArgs[0] : Path.Combine("data", "sample.json");
+
+    var impService = new CatalogService(new InMemoryCatalogStore());
+    var impImporter = new JsonCatalogImporter();
+
+    using var impCts = new CancellationTokenSource();
+
+    ConsoleCancelEventHandler impOnCancel = (_, e) =>
+    {
+        e.Cancel = true;
+        impCts.Cancel();
+        Console.WriteLine("Отримано Ctrl+C, скасовую імпорт...");
+    };
+    Console.CancelKeyPress += impOnCancel;
+
+    if (impCancelAfterMs > 0)
+        impCts.CancelAfter(impCancelAfterMs);
+
+    try
+    {
+        int impCount = await impService.ImportAsync(impImporter, impPath, impCts.Token);
+        Console.WriteLine($"Імпортовано записів: {impCount}");
+
+        int impAgain = await impService.ImportAsync(impImporter, impPath, impCts.Token);
+        Console.WriteLine($"Повторний імпорт того самого файлу: {impAgain}");
+
+        Console.WriteLine($"Усього в каталозі: {impService.All().Count}");
+        return 0;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine($"Імпорт скасовано. У каталозі встигло з'явитись: {impService.All().Count}");
+        return 2;
+    }
+    catch (DomainException ex)
+    {
+        Console.WriteLine($"Дані відхилено: {ex.Message}");
+        return 3;
+    }
+    catch (FileNotFoundException)
+    {
+        Console.WriteLine($"Файл не знайдено: {Path.GetFullPath(impPath)}");
+        return 1;
+    }
+    catch (JsonException ex)
+    {
+        Console.WriteLine($"Некоректний JSON (технічна помилка): {ex.Message}");
+        return 4;
+    }
+    catch (IOException ex)
+    {
+        Console.WriteLine($"Помилка читання файлу (технічна): {ex.Message}");
+        return 5;
+    }
+    finally
+    {
+        Console.CancelKeyPress -= impOnCancel;
+    }
 }
 
 if (args.Any(a => a.StartsWith("report-")))

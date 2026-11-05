@@ -13,6 +13,8 @@
 - [Лабораторна 4: доменна модель, інваріанти, інкапсуляція](#лабораторна-4-доменна-модель-product-інваріанти-інкапсуляція)
 - [Лабораторна 5: сервісний шар, інтерфейси, ручний DI](#лабораторна-5-сервісний-шар-інтерфейси-ручний-di)
 - [Лабораторна 6: доменні події, делегати, лямбди](#лабораторна-6-доменні-події-делегати-лямбди)
+- [Лабораторна 7: звіти через LINQ](#лабораторна-7-звіти-через-linq)
+- [Лабораторна 8: async/await, скасування, доменні винятки, unit-тести](#лабораторна-8-asyncawait-скасування-доменні-винятки-unit-тести)
 
 ## Запуск
 
@@ -452,7 +454,7 @@ src/Core/Domain/Product.cs
 | Id / Sku / Name не порожні | `ArgumentException` | `Create` |
 | Початковий залишок не від'ємний | `ArgumentOutOfRangeException` | `Create` |
 | Кількість приходу/видачі > 0 | `ArgumentOutOfRangeException` | `RegisterArrival`, `Issue` |
-| Не можна видати більше, ніж є в наявності | `InvalidOperationException` | `Issue` |
+| Не можна видати більше, ніж є в наявності | `DomainException` (до лаб. 8 — `InvalidOperationException`) | `Issue` |
 
 ### Мапінг DTO ↔ сутність
 
@@ -473,7 +475,7 @@ P-001 [SKU-001] Цемент М400 25кг — 100 шт
 P-001 [SKU-001] Цемент М400 25кг — 120 шт
 
 === Сценарій 2: порушення інваріантів ===
-  видача більша за залишок: InvalidOperationException — Не можна видати 1000: залишок SKU-001 = 120
+    видача більша за залишок: DomainException — Не можна видати 1000: залишок SKU-001 = 120
   порожній SKU: ArgumentException — SKU не може бути порожнім (Parameter 'sku')
   від'ємний залишок: ArgumentOutOfRangeException — Початковий залишок не може бути від'ємним (Parameter 'quantity') Actual value was -5.
 ```
@@ -827,3 +829,66 @@ select new GroupSummary(g.Key, g.Count(), g.Sum(p => p.Quantity))
 | `dotnet run --project src/Cli -- report-moves` | Join і GroupJoin: рядки переміщень і топ-3 товари |
 | `dotnet run --project src/Cli -- report-query` | `ByUnit` у двох синтаксисах і порівняння |
 | `dotnet run --project src/Cli -- report-bench` | Stopwatch: 4 варіанти на 100 000 записів |
+
+## Лабораторна 8: async/await, скасування, доменні винятки, unit-тести
+
+### Класифікація помилок
+
+- `ArgumentException` / `ArgumentOutOfRangeException`: некоректне значення аргументу
+  (порожній SKU, від'ємна кількість). Це перевірки в `Product.Create`, `RegisterArrival`, `Issue`.
+- `DomainException` (`src/Core/DomainException.cs`): порушення бізнес-правила за коректних
+  аргументів: видача більша за залишок, недозволений перехід стану переміщення, переповнення
+  складу, відсутній запис, дубль id.
+- `IOException`, `FileNotFoundException`, `JsonException`: технічні помилки. Вони не маскуються
+  під доменні й обробляються в Cli окремо.
+- `OperationCanceledException`: очікуване скасування, а не помилка. Усі `catch` ставлять її першою.
+
+### Асинхронний імпорт
+
+- `ICatalogImporter.LoadAsync(path, ct)` (`src/Core/Abstractions`) і реалізація
+  `JsonCatalogImporter` (`src/Core/Storage`) читають файл через `FileStream` з `useAsync: true`
+  і `JsonSerializer.DeserializeAsync`, передають токен усюди та перевіряють його в циклі.
+- Некоректний запис дає `DomainException` з номером запису; оригінальний виняток зберігається
+  в `InnerException`.
+- `CatalogService.ImportAsync(importer, path, ct)` додає лише нові записи (повторний імпорт
+  не дублює їх), для кожного піднімає подію `Added` і повертає кількість доданих.
+- У рішенні немає `.Result`, `.Wait()` і `async void`.
+
+### Скасування
+
+Режим `--import-async [файл] [--cancel-after мс]`. Скасувати можна через Ctrl+C
+(`Console.CancelKeyPress`) або автоматично через таймер (`CancelAfter`). Порядок обробки:
+`OperationCanceledException` → `DomainException` → `FileNotFoundException` → `JsonException` → `IOException`.
+
+| Команда | Результат |
+|---|---|
+| `dotnet run --project src/Cli -- --import-async data/sample.json` | `Імпортовано записів: 3`, повторний імпорт: 0 |
+| `dotnet run --project src/Cli -- --import-async data/bad.json` | `Дані відхилено: Запис 3: SKU не може бути порожнім ...` |
+| `dotnet run --project src/Cli -- --import-async data/nope.json` | `Файл не знайдено: ...` |
+| `dotnet run --project src/Cli -- --import-async data/broken.json` | `Некоректний JSON (технічна помилка): ...` |
+| `dotnet run --project src/Cli -- --import-async data/big.json --cancel-after 30` | `Імпорт скасовано.` |
+
+Великий файл для перевірки скасування генерується локально і не комітиться (`data/big.json` в `.gitignore`):
+
+```bash
+awk 'BEGIN{printf "["; for(i=1;i<=200000;i++){ if(i>1) printf ","; printf "{\"Id\":\"B-%d\",\"Sku\":\"SKU-B%d\",\"Name\":\"Товар %d\",\"Unit\":\"шт\",\"Quantity\":%d}\n", i,i,i,i%500 } printf "]"}' > data/big.json
+```
+
+### Тести
+
+Проєкт `tests/Core.Tests` (xUnit) посилається лише на `Core`, не на `Cli`. Сховище в тестах це
+`InMemoryCatalogStore`, дані: `TestData.Items()` з чотирьох записів. Диск потрібен лише одному
+тесту (тимчасовий файл видаляється у `finally`).
+
+```bash
+dotnet test
+```
+
+Результат: `total: 7; failed: 0` (шість тестових методів, `[Theory]` запускається двічі).
+
+- `Receive_WithNegativeQuantity_Throws_AndKeepsState`: відмова і незмінний стан
+- `Add_RaisesChangedExactlyOnce`: подія піднімається один раз
+- `LowStock_CountsOnlyBelowThreshold` (`[Theory]`, пороги 10 і 1): звіт на кількох наборах
+- `TopByQuantity_IsDeterministic`: топ-N з однаковим результатом
+- `ImportAsync_WhenAlreadyCancelled_Throws`: скасований токен
+- `ImportAsync_WithBadRecord_ThrowsDomainException_AndAddsNothing`: поганий запис у тимчасовому файлі

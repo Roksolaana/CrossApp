@@ -27,10 +27,34 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
         return product;
     }
 
+    public async Task<int> ImportAsync(
+        ICatalogImporter importer, string path, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(importer);
+        ct.ThrowIfCancellationRequested();
+
+        var items = await importer.LoadAsync(path, ct);
+
+        var imported = 0;
+        foreach (var item in items)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (_store.GetById(item.Id) is not null)
+                continue;
+
+            _store.Add(item);
+            OnChanged(item, CatalogChangeKind.Added, item.Quantity);
+            imported++;
+        }
+
+        return imported;
+    }
+    
     public void Receive(string id, int quantity)
     {
         var product = _store.GetById(id)
-            ?? throw new InvalidOperationException($"Немає запису з id={id}.");
+            ?? throw new DomainException($"Немає запису з id={id}.");
 
         product.RegisterArrival(quantity);
         _store.Update(product);
@@ -40,7 +64,7 @@ public sealed class CatalogService(ICatalogStore store, IEnumerable<INotificatio
     public void Issue(string id, int quantity)
     {
         var product = _store.GetById(id)
-            ?? throw new InvalidOperationException($"Немає запису з id={id}.");
+            ?? throw new DomainException($"Немає запису з id={id}.");
 
         product.Issue(quantity);
         _store.Update(product);

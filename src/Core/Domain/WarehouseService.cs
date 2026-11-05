@@ -5,7 +5,7 @@ public static class WarehouseService
     public static void RegisterArrival(Warehouse warehouse, Product product, int amount)
     {
         if (warehouse.Occupied + amount > warehouse.Capacity)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Склад {warehouse.Name} переповнений: місткість {warehouse.Capacity}, зайнято {warehouse.Occupied}, спроба додати {amount}");
 
         product.RegisterArrival(amount);

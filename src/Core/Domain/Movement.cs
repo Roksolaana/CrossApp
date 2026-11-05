@@ -38,7 +38,7 @@ public sealed class Movement
         };
 
         if (!allowed)
-            throw new InvalidOperationException(
+            throw new DomainException(
                 $"Перехід зі стану {Status} у {target} неможливий для переміщення {Id}");
 
         Status = target;

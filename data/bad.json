@@ -1,0 +1,6 @@
+[
+  { "Id": "X-001", "Sku": "SKU-X1", "Name": "Нормальний", "Unit": "шт", "Quantity": 10 },
+  { "Id": "X-002", "Sku": "SKU-X2", "Name": "Нормальний 2", "Unit": "шт", "Quantity": 5 },
+  { "Id": "X-003", "Sku": "", "Name": "Без SKU", "Unit": "шт", "Quantity": 7 },
+  { "Id": "X-004", "Sku": "SKU-X4", "Name": "Мінус", "Unit": "шт", "Quantity": -5 }
+]
