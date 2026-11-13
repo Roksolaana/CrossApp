@@ -15,6 +15,7 @@
 - [Лабораторна 6: доменні події, делегати, лямбди](#лабораторна-6-доменні-події-делегати-лямбди)
 - [Лабораторна 7: звіти через LINQ](#лабораторна-7-звіти-через-linq)
 - [Лабораторна 8: async/await, скасування, доменні винятки, unit-тести](#лабораторна-8-asyncawait-скасування-доменні-винятки-unit-тести)
+- [Лабораторна 9: шляхи, конфігурація, secrets](#лабораторна-9-шляхи-конфігурація-secrets)
 
 ## Запуск
 
@@ -953,3 +954,68 @@ dotnet test --collect:"XPlat Code Coverage"
 Покриття не є самоціллю: 100% не гарантує коректності.
 
 Після додаткових завдань `dotnet test` дає `total: 13; failed: 0`.
+
+## Лабораторна 9: шляхи, конфігурація, secrets
+
+### Профілі
+
+Профіль обирається змінною `CROSSAPP_ENVIRONMENT` (за замовчуванням `Development`).
+
+| Профіль | Logging:MinimumLevel | Де лежать дані |
+|---|---|---|
+| Development | Debug (видно рядки `[debug]`) | `<каталог програми>/data/items.json` |
+| Production | Warning | `LocalApplicationData/CrossApp/items.json` (на Windows `%LOCALAPPDATA%\CrossApp`) |
+
+### Ключі конфігурації
+
+| Ключ | Значення за замовчуванням | Змінна середовища |
+|---|---|---|
+| `EnvironmentName` | `Development` | `CROSSAPP_EnvironmentName` |
+| `Logging:MinimumLevel` | `Information` | `CROSSAPP_Logging__MinimumLevel` |
+| `Storage:DataPath` | `data` | `CROSSAPP_Storage__DataPath` або `CROSSAPP_DATA_PATH` |
+| `Storage:FileName` | `items.json` | `CROSSAPP_Storage__FileName` |
+| `Warehouse:DefaultUnit` | `шт` | `CROSSAPP_Warehouse__DefaultUnit` |
+| `Integration:ApiKey` | немає (лише user-secrets або env) | `CROSSAPP_Integration__ApiKey` |
+
+Порядок джерел (пізніше перекриває раніше): `appsettings.json`, `appsettings.{Environment}.json`, user-secrets, змінні `CROSSAPP_*`, аргументи командного рядка (`--Storage:FileName=x.json`). Відносний `DataPath` будується від `AppContext.BaseDirectory`, тому запуск з будь-якого каталогу дає той самий файл.
+
+### Команди
+
+```bash
+dotnet run --project src/Cli -- config                     # усі налаштування
+dotnet run --project src/Cli -- export                     # експорт SampleData у файл даних
+dotnet run --project src/Cli -- export data/sample.json    # експорт з JSON-файлу
+dotnet run --project src/Cli -- import                     # імпорт колекції з файлу даних
+```
+
+### Змінні середовища
+
+PowerShell:
+
+```powershell
+$env:CROSSAPP_DATA_PATH = "custom-data"
+$env:CROSSAPP_ENVIRONMENT = "Production"
+$env:CROSSAPP_Integration__ApiKey = "from-env"
+dotnet run --project src/Cli -- config
+```
+
+bash:
+
+```bash
+CROSSAPP_DATA_PATH=custom-data dotnet run --project src/Cli -- export
+CROSSAPP_ENVIRONMENT=Production dotnet run --project src/Cli -- config
+```
+
+### Secret
+
+```bash
+dotnet user-secrets init --project src/Cli
+dotnet user-secrets set "Integration:ApiKey" "<ваш-ключ>" --project src/Cli
+dotnet user-secrets list --project src/Cli
+```
+
+Значення зберігається поза репозиторієм: Windows `%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json`, Linux/macOS `~/.microsoft/usersecrets/<UserSecretsId>/secrets.json`. У репозиторії лише `UserSecretsId` у `Cli.csproj`. Програма друкує тільки «ApiKey: присутній, довжина N».
+
+### Файл даних
+
+JSON-масив `ProductDto` у camelCase (`id`, `sku`, `name`, `unit`, `quantity`), з відступами і кирилицею без `\uXXXX`. Запис атомарний: спочатку `items.json.tmp`, потім `File.Move` з заміною.

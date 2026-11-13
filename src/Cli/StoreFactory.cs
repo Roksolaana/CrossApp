@@ -4,8 +4,8 @@ using Core.Storage;
 
 internal static class StoreFactory
 {
-    public static string DataPath { get; } =
-        Path.Combine(AppContext.BaseDirectory, "data", "catalog.json");
+    public static string DataPath { get; set; } =
+        Path.Combine(AppContext.BaseDirectory, "data", "items.json");
 
     public static ICatalogStore Create(string[] args)
     {

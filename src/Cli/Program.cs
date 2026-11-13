@@ -8,6 +8,115 @@ using Core.Events;
 using Core.Reports;
 using System.Text.Json;
 using Core;
+using System.Reflection;
+using Core.Configuration;
+using Microsoft.Extensions.Configuration;
+
+
+var cfgEnv = Environment.GetEnvironmentVariable("CROSSAPP_ENVIRONMENT") ?? "Development";
+
+var cfg = new ConfigurationBuilder()
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+    .AddJsonFile($"appsettings.{cfgEnv}.json", optional: true, reloadOnChange: false)
+    .AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true)
+    .AddEnvironmentVariables(prefix: "CROSSAPP_")
+    .AddCommandLine(args.Where(a => a.Contains('=')).ToArray())
+    .Build();
+
+var cfgOptions = cfg.Get<AppOptions>() ?? new AppOptions();
+
+var cfgLegacyPath = Environment.GetEnvironmentVariable("CROSSAPP_DATA_PATH");
+var cfgStorage = new StorageOptions
+{
+    DataPath = string.IsNullOrWhiteSpace(cfgLegacyPath) ? cfgOptions.Storage.DataPath : cfgLegacyPath,
+    FileName = cfgOptions.Storage.FileName
+};
+
+var cfgDataFile = cfgStorage.ResolveFullPath(AppContext.BaseDirectory);
+var cfgApiKey = cfg["Integration:ApiKey"];
+StoreFactory.DataPath = cfgDataFile;
+
+if (args.Contains("config"))
+{
+    Console.WriteLine($"Профіль (CROSSAPP_ENVIRONMENT): {cfgEnv}");
+    Console.WriteLine($"EnvironmentName            : {cfgOptions.EnvironmentName}");
+    Console.WriteLine($"Logging:MinimumLevel       : {cfgOptions.Logging.MinimumLevel}");
+    Console.WriteLine($"Storage:DataPath           : {cfgStorage.DataPath}");
+    Console.WriteLine($"Storage:FileName           : {cfgStorage.FileName}");
+    Console.WriteLine($"Warehouse:DefaultUnit      : {cfgOptions.Warehouse.DefaultUnit}");
+    Console.WriteLine($"Файл даних                 : {cfgDataFile}");
+    Console.WriteLine(cfgApiKey is null ? "ApiKey: не заданий" : $"ApiKey: присутній, довжина {cfgApiKey.Length}");
+    Console.WriteLine($"CurrentDirectory           : {Environment.CurrentDirectory}");
+    Console.WriteLine($"BaseDirectory              : {AppContext.BaseDirectory}");
+    LogDebug("порядок джерел: appsettings.json, appsettings.{профіль}.json, user-secrets, CROSSAPP_*, командний рядок");
+    return 0;
+}
+
+if (args.Contains("export"))
+{
+    Console.WriteLine($"Файл даних : {cfgDataFile}");
+    Console.WriteLine(cfgApiKey is null ? "ApiKey: не заданий" : $"ApiKey: присутній, довжина {cfgApiKey.Length}");
+
+    var exportSource = args.SkipWhile(a => a != "export").Skip(1)
+        .FirstOrDefault(a => !a.StartsWith("--"));
+
+    try
+    {
+        IReadOnlyList<Product> exportItems = exportSource is null
+            ? SampleData.Products().ToList()
+            : await new JsonCatalogImporter().LoadAsync(exportSource);
+
+        var exportStore = new FileCatalogStore(cfgDataFile);
+        exportStore.ReplaceAll(exportItems);
+        LogDebug($"записано через {Path.GetFileName(cfgDataFile)}.tmp і File.Move");
+        Console.WriteLine($"Експортовано записів: {exportStore.List().Count}");
+        return 0;
+    }
+    catch (FileNotFoundException)
+    {
+        Console.WriteLine($"Файл-джерело не знайдено: {Path.GetFullPath(exportSource!)}");
+        return 1;
+    }
+    catch (DomainException ex)
+    {
+        Console.WriteLine($"Дані відхилено: {ex.Message}");
+        return 3;
+    }
+    catch (JsonException ex)
+    {
+        Console.WriteLine($"Некоректний JSON у джерелі: {ex.Message}");
+        return 4;
+    }
+}
+
+if (args.Contains("import"))
+{
+    var importArg = args.SkipWhile(a => a != "import").Skip(1)
+        .FirstOrDefault(a => !a.StartsWith("--"));
+    var importFile = importArg is null ? cfgDataFile : Path.GetFullPath(importArg);
+    Console.WriteLine($"Файл даних : {importFile}");
+
+    if (!File.Exists(importFile))
+    {
+        Console.WriteLine("Файл не знайдено. Спершу виконайте export.");
+        return 1;
+    }
+
+    try
+    {
+        var importItems = new FileCatalogStore(importFile).List();
+        Console.WriteLine($"Імпортовано записів: {importItems.Count}");
+        foreach (var p in importItems.Take(5))
+            Console.WriteLine($"  {p}");
+        return 0;
+    }
+    catch (InvalidDataException ex)
+    {
+        Console.WriteLine($"Не вдалося прочитати дані: {ex.Message}");
+        return 4;
+    }
+}
 
 if (args.Contains("--domain"))
 {
@@ -544,4 +653,10 @@ static void TryDo(string title, Action action)
     {
         Console.WriteLine($"  {title}: {ex.GetType().Name} — {ex.Message}");
     }
+}
+
+void LogDebug(string message)
+{
+    if (string.Equals(cfgOptions.Logging.MinimumLevel, "Debug", StringComparison.OrdinalIgnoreCase))
+        Console.WriteLine($"[debug] {message}");
 }

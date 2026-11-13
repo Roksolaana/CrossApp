@@ -489,3 +489,6 @@ publish-sc-win/
 publish-sc-linux/
 
 data/big.json
+
+data/items.json
+*.tmp
