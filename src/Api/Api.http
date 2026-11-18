@@ -1,0 +1,39 @@
+@host = http://localhost:5080
+
+### Health
+GET {{host}}/health
+
+### Список
+GET {{host}}/api/products
+
+### Створити
+# @name create
+POST {{host}}/api/products
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "Цемент М400", "unit": "мішок", "quantity": 40 }
+
+### Прочитати за id
+@id = {{create.response.body.id}}
+GET {{host}}/api/products/{{id}}
+
+### Оновити
+PUT {{host}}/api/products/{{id}}
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "Цемент М500", "unit": "мішок", "quantity": 35 }
+
+### Оновити з порожньою назвою, очікуємо 400
+PUT {{host}}/api/products/{{id}}
+Content-Type: application/json
+
+{ "sku": "A-100", "name": "", "unit": "мішок", "quantity": 35 }
+
+### Видалити
+DELETE {{host}}/api/products/{{id}}
+
+### Після видалення, очікуємо 404
+GET {{host}}/api/products/{{id}}
+
+### Низький залишок
+GET {{host}}/api/products/low-stock?threshold=50

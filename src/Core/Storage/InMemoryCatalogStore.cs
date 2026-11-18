@@ -5,24 +5,53 @@ namespace Core.Storage;
 
 public sealed class InMemoryCatalogStore(IEnumerable<Product>? seed = null) : ICatalogStore
 {
+    private readonly object _gate = new();
+
     private readonly Dictionary<string, Product> _items =
         (seed ?? []).ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase);
 
-    public IReadOnlyList<Product> List() => _items.Values.ToList();
+    public IReadOnlyList<Product> List()
+    {
+        lock (_gate)
+        {
+            return _items.Values.ToList();
+        }
+    }
 
-    public Product? GetById(string id) => _items.GetValueOrDefault(id);
+    public Product? GetById(string id)
+    {
+        lock (_gate)
+        {
+            return _items.GetValueOrDefault(id);
+        }
+    }
 
-    public void Update(Product item) => _items[item.Id] = item;
+    public void Update(Product item)
+    {
+        lock (_gate)
+        {
+            _items[item.Id] = item;
+        }
+    }
 
-    public bool Remove(string id) => _items.Remove(id);
+    public bool Remove(string id)
+    {
+        lock (_gate)
+        {
+            return _items.Remove(id);
+        }
+    }
 
     public void Add(Product item)
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        if (_items.ContainsKey(item.Id))
-            throw new DomainException($"Запис з id={item.Id} уже існує.");
+        lock (_gate)
+        {
+            if (_items.ContainsKey(item.Id))
+                throw new DomainException($"Запис з id={item.Id} уже існує.");
 
-        _items.Add(item.Id, item);
+            _items.Add(item.Id, item);
+        }
     }
 }

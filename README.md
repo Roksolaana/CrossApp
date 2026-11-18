@@ -16,6 +16,7 @@
 - [Лабораторна 7: звіти через LINQ](#лабораторна-7-звіти-через-linq)
 - [Лабораторна 8: async/await, скасування, доменні винятки, unit-тести](#лабораторна-8-asyncawait-скасування-доменні-винятки-unit-тести)
 - [Лабораторна 9: шляхи, конфігурація, secrets](#лабораторна-9-шляхи-конфігурація-secrets)
+- [Лабораторна 10: Minimal API, CRUD, валідація, OpenAPI (Scalar)](#лабораторна-10-minimal-api-crud-валідація-openapi-scalar)
 
 ## Запуск
 
@@ -1019,3 +1020,82 @@ dotnet user-secrets list --project src/Cli
 ### Файл даних
 
 JSON-масив `ProductDto` у camelCase (`id`, `sku`, `name`, `unit`, `quantity`), з відступами і кирилицею без `\uXXXX`. Запис атомарний: спочатку `items.json.tmp`, потім `File.Move` з заміною.
+
+## Лабораторна 10: Minimal API, CRUD, валідація, OpenAPI (Scalar)
+
+### Структура
+
+`src/Api` — друга точка входу поряд із `src/Cli`. Обидва проєкти використовують один `Core`; `Core` не залежить від ASP.NET Core.
+
+```
+src/Api/
+  Program.cs                 DI, OpenAPI/Scalar, ProblemDetails, обробник винятків
+  Contracts/ProductDto.cs    вихідний DTO (і LowStockDto)
+  Contracts/SaveProductRequest.cs   вхідний DTO з валідацією
+  Endpoints/ProductEndpoints.cs     маршрути /api/products
+  Properties/launchSettings.json    порт 5080
+  Api.http                   запити для VS Code (REST Client)
+```
+
+### Запуск
+
+```bash
+dotnet run --project src/Api --urls http://localhost:5080
+```
+
+Порт: **5080** (також заданий у `src/Api/Properties/launchSettings.json`). У режимі Development доступні документ OpenAPI `http://localhost:5080/openapi/v1.json` та інтерфейс Scalar `http://localhost:5080/scalar/v1`. У Production вони вимкнені (відповідь 404).
+
+### Маршрути
+
+| Метод | Шлях | Тіло | Коди |
+|---|---|---|---|
+| GET | /health | немає | 200 |
+| GET | /api/products | немає | 200 |
+| GET | /api/products/{id} | немає | 200, 404 |
+| GET | /api/products/low-stock?threshold=5 | немає | 200, 400 |
+| POST | /api/products | SaveProductRequest | 201 (+ `Location`), 400, 409 |
+| PUT | /api/products/{id} | SaveProductRequest | 200, 400, 404, 409 |
+| DELETE | /api/products/{id} | немає | 204, 404 |
+
+`SaveProductRequest`: `sku` (обов'язковий, до 50 символів), `name` (обов'язкова, до 200), `unit` (обов'язкова, до 20), `quantity` (ціле, не менше 0). Ідентифікатор генерує сервер.
+
+### Приклади curl
+
+```bash
+curl -i -X POST http://localhost:5080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"A-100","name":"Cement M400","unit":"bag","quantity":40}'
+# 201 Created, Location: /api/products/<id>
+# {"id":"<id>","sku":"A-100","name":"Cement M400","unit":"bag","quantity":40}
+
+curl -i http://localhost:5080/api/products/<id>                 # 200
+curl -i -X PUT http://localhost:5080/api/products/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"A-100","name":"Cement M500","unit":"bag","quantity":35}'   # 200
+curl -i -X DELETE http://localhost:5080/api/products/<id>       # 204
+curl -i http://localhost:5080/api/products/<id>                 # 404
+
+curl -i -X POST http://localhost:5080/api/products \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"","name":"X","unit":"","quantity":-1}'
+# 400, "errors": { "Sku": [...], "Unit": [...], "Quantity": [...] }
+
+curl -i "http://localhost:5080/api/products/low-stock?threshold=50"   # 200
+```
+
+У Git Bash на Windows кирилицю в `-d` curl може передати не в UTF-8 і отримати 400. Тоді передавайте тіло файлом: `--data-binary @data/body.json` (файл у UTF-8). Запити з файлу `src/Api/Api.http` (розширення REST Client для VS Code) такої проблеми не мають.
+
+### Помилки
+
+- Порушення правил валідації: `400` і `ValidationProblem` (`errors`: поле → список повідомлень).
+- Порожнє тіло, зіпсований JSON, неправильний тип поля (`"quantity":"abc"`): `400` у форматі ProblemDetails.
+- Немає ресурсу: `404`.
+- `DomainException` з Core (наприклад, дубль id): `409 Conflict`; `ArgumentException` з `Product.Create`: `400`.
+- Непередбачений виняток: `500` у форматі ProblemDetails (RFC 9457) без тексту винятку, шляхів і stack trace; деталі лишаються в логах сервера (`traceId` зв'язує відповідь і лог).
+
+### Рішення
+
+- **DTO окремо від доменної сутності.** `Product` має інваріанти й фабрику `Create`; клієнт бачить лише `ProductDto`. Зміни всередині `Product` не ламають формат JSON. Окремий `Api.Contracts.ProductDto` не залежить від `Core.Dto.ProductDto` (формат файлу з лаби 9).
+- **Час життя сховища.** `ICatalogStore` зареєстровано як Singleton: дані мають жити між запитами (Scoped/Transient створювали б порожнє сховище на кожен запит). Запити обробляються паралельно, тому `InMemoryCatalogStore` захищено `lock`, а `List()` повертає копію.
+- **Сховище синхронне.** `ICatalogStore` лишається синхронним (рішення з лаб. 9); заміна на EF Core + SQLite не змінює маршрути та формат відповідей, бо маршрути залежать лише від інтерфейсу.
+- **Тільки Development.** OpenAPI і Scalar вмикаються лише в Development, щоб не розкривати опис API у Production.
