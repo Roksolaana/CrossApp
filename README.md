@@ -1029,12 +1029,17 @@ JSON-масив `ProductDto` у camelCase (`id`, `sku`, `name`, `unit`, `quantit
 
 ```
 src/Api/
-  Program.cs                 DI, OpenAPI/Scalar, ProblemDetails, обробник винятків
-  Contracts/ProductDto.cs    вихідний DTO (і LowStockDto)
-  Contracts/SaveProductRequest.cs   вхідний DTO з валідацією
-  Endpoints/ProductEndpoints.cs     маршрути /api/products
-  Properties/launchSettings.json    порт 5080
-  Api.http                   запити для VS Code (REST Client)
+  Program.cs                          DI, OpenAPI/Scalar, ProblemDetails, обробники винятків
+  Contracts/ProductDto.cs             вихідний DTO (і LowStockDto)
+  Contracts/SaveProductRequest.cs     вхідний DTO
+  Contracts/PagedResult.cs            відповідь списку { items, total }
+  Endpoints/ProductEndpoints.cs       маршрути /api/products
+  Validators/SaveProductRequestValidator.cs   правила валідації (FluentValidation)
+  Filters/ValidationFilter.cs         endpoint filter для POST і PUT
+  Errors/DomainExceptionHandler.cs    DomainException -> 409
+  Properties/launchSettings.json      порт 5080
+  Api.http                            запити для VS Code (REST Client)
+tests/Api.Tests/                      інтеграційні тести (WebApplicationFactory)
 ```
 
 ### Запуск
@@ -1050,7 +1055,7 @@ dotnet run --project src/Api --urls http://localhost:5080
 | Метод | Шлях | Тіло | Коди |
 |---|---|---|---|
 | GET | /health | немає | 200 |
-| GET | /api/products | немає | 200 |
+| GET | /api/products?page=1&pageSize=20&search=... | немає | 200 (`{ items, total }`), 400 |
 | GET | /api/products/{id} | немає | 200, 404 |
 | GET | /api/products/low-stock?threshold=5 | немає | 200, 400 |
 | POST | /api/products | SaveProductRequest | 201 (+ `Location`), 400, 409 |
@@ -1099,3 +1104,21 @@ curl -i "http://localhost:5080/api/products/low-stock?threshold=50"   # 200
 - **Час життя сховища.** `ICatalogStore` зареєстровано як Singleton: дані мають жити між запитами (Scoped/Transient створювали б порожнє сховище на кожен запит). Запити обробляються паралельно, тому `InMemoryCatalogStore` захищено `lock`, а `List()` повертає копію.
 - **Сховище синхронне.** `ICatalogStore` лишається синхронним (рішення з лаб. 9); заміна на EF Core + SQLite не змінює маршрути та формат відповідей, бо маршрути залежать лише від інтерфейсу.
 - **Тільки Development.** OpenAPI і Scalar вмикаються лише в Development, щоб не розкривати опис API у Production.
+
+### Додаткові завдання (лаб. 10)
+
+#### 1. Пагінація і пошук
+
+`GET /api/products?page=1&pageSize=20&search=cement` повертає `{ "items": [...], "total": N }`. `page` починається з 1, `pageSize` від 1 до 100, `search` шукає підрядок у `sku` і `name` без урахування регістру; записи відсортовані за `sku`. Некоректні `page`/`pageSize` дають 400.
+
+#### 2. FluentValidation через endpoint filter
+
+Правила валідації винесені з `SaveProductRequest` у `SaveProductRequestValidator` (FluentValidation 11). `ValidationFilter<T>` підключений до POST і PUT через `AddEndpointFilter` і повертає 400 `ValidationProblem` ще до виклику обробника. Тексти й формат помилок не змінилися.
+
+#### 3. `DomainException` → 409
+
+`DomainExceptionHandler` (`IExceptionHandler`) перетворює `DomainException` на `409 Conflict` у форматі ProblemDetails; інші винятки по-старому дають 500 без деталей.
+
+#### 4. Інтеграційні тести
+
+`tests/Api.Tests` (xUnit, `WebApplicationFactory<Program>`): POST дає 201, а `Location` веде до створеного запису; 400 з переліком полів; 404 для невідомого id; DELETE → GET дає 404; пошук і пагінація. Запуск: `dotnet test`.

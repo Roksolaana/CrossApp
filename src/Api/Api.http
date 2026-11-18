@@ -37,3 +37,6 @@ GET {{host}}/api/products/{{id}}
 
 ### Низький залишок
 GET {{host}}/api/products/low-stock?threshold=50
+
+### Пагінація і пошук
+GET {{host}}/api/products?page=1&pageSize=2&search=цемент

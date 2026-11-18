@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using Api.Contracts;
-using Core;
+using Api.Filters;
 using Core.Abstractions;
 using Core.Domain;
 using Core.Reports;
@@ -17,13 +17,51 @@ public static class ProductEndpoints
         group.MapGet("/", List);
         group.MapGet("/low-stock", LowStock);
         group.MapGet("/{id}", GetById);
-        group.MapPost("/", Create);
-        group.MapPut("/{id}", Replace);
+
+        group.MapPost("/", Create)
+            .AddEndpointFilter<ValidationFilter<SaveProductRequest>>()
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPut("/{id}", Replace)
+            .AddEndpointFilter<ValidationFilter<SaveProductRequest>>()
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
         group.MapDelete("/{id}", Delete);
     }
 
-    private static Ok<List<ProductDto>> List(ICatalogStore store) =>
-        TypedResults.Ok(store.List().Select(p => p.ToContract()).ToList());
+    private static Results<Ok<PagedResult<ProductDto>>, ValidationProblem> List(
+        ICatalogStore store, int? page, int? pageSize, string? search)
+    {
+        var currentPage = page ?? 1;
+        var size = pageSize ?? 20;
+
+        var errors = new Dictionary<string, string[]>();
+        if (currentPage < 1)
+            errors["page"] = ["Номер сторінки має бути не менше 1."];
+        if (size is < 1 or > 100)
+            errors["pageSize"] = ["Розмір сторінки має бути від 1 до 100."];
+        if (errors.Count > 0)
+            return TypedResults.ValidationProblem(errors);
+
+        IEnumerable<Product> query = store.List();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(p =>
+                p.Sku.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                p.Name.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var ordered = query.OrderBy(p => p.Sku, StringComparer.Ordinal).ToList();
+        var offset = (long)(currentPage - 1) * size;
+
+        var items = offset >= ordered.Count
+            ? new List<ProductDto>()
+            : ordered.Skip((int)offset).Take(size).Select(p => p.ToContract()).ToList();
+
+        return TypedResults.Ok(new PagedResult<ProductDto>(items, ordered.Count));
+    }
 
     private static Results<Ok<List<LowStockDto>>, ValidationProblem> LowStock(
         ICatalogStore store, int? threshold)
@@ -48,12 +86,9 @@ public static class ProductEndpoints
             ? TypedResults.Ok(found.ToContract())
             : TypedResults.NotFound();
 
-    private static Results<Created<ProductDto>, ValidationProblem, ProblemHttpResult> Create(
+    private static Results<Created<ProductDto>, ValidationProblem> Create(
         SaveProductRequest request, ICatalogStore store)
     {
-        if (!request.TryValidate(out var errors))
-            return TypedResults.ValidationProblem(errors);
-
         var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(4)).ToLowerInvariant();
 
         try
@@ -69,18 +104,11 @@ public static class ProductEndpoints
                 [ex.ParamName ?? "request"] = [ex.Message]
             });
         }
-        catch (DomainException ex)
-        {
-            return TypedResults.Problem(ex.Message, title: "Порушено правило домену", statusCode: 409);
-        }
     }
 
-    private static Results<Ok<ProductDto>, NotFound, ValidationProblem, ProblemHttpResult> Replace(
+    private static Results<Ok<ProductDto>, NotFound, ValidationProblem> Replace(
         string id, SaveProductRequest request, ICatalogStore store)
     {
-        if (!request.TryValidate(out var errors))
-            return TypedResults.ValidationProblem(errors);
-
         if (store.GetById(id) is null)
             return TypedResults.NotFound();
 
@@ -96,10 +124,6 @@ public static class ProductEndpoints
             {
                 [ex.ParamName ?? "request"] = [ex.Message]
             });
-        }
-        catch (DomainException ex)
-        {
-            return TypedResults.Problem(ex.Message, title: "Порушено правило домену", statusCode: 409);
         }
     }
 
